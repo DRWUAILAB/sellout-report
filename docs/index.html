@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Sell-out 報表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登入 -->
+<section id="login" class="login">
+  <form id="loginForm" class="login-card" autocomplete="off">
+    <div class="brand-mark">SO</div>
+    <h1>Sell-out 報表</h1>
+    <p class="muted">資料已加密，請輸入密碼開啟。</p>
+    <input id="pw" type="password" placeholder="密碼" autofocus required>
+    <label class="remember"><input id="remember" type="checkbox" checked> 這個分頁記住密碼</label>
+    <button type="submit" id="loginBtn">開啟報表</button>
+    <p id="loginMsg" class="err" role="alert"></p>
+  </form>
+</section>
+
+<!-- 報表 -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="title">
+      <div class="brand-mark sm">SO</div>
+      <div>
+        <h1>Sell-out 報表</h1>
+        <p class="muted small" id="meta"></p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="r1" class="active">① 市場綜合折扣率</button>
+      <button role="tab" data-tab="r2">② 系列別 by 月</button>
+      <button role="tab" data-tab="r3">③ 系列別樞紐（月）</button>
+      <button role="tab" data-tab="r4">④ 通路別</button>
+      <button role="tab" data-tab="chk">資料檢核</button>
+      <button role="tab" data-tab="upd">資料更新</button>
+    </nav>
+    <div class="top-actions">
+      <label class="switch" title="NS 缺 BOM 的組包，用組合單／產品代碼拆解補上。預設關閉（只用 NS BOM＋補充 BOM，與業務參考值口徑一致）">
+        <input type="checkbox" id="useTemp"><span>含暫用 BOM</span>
+      </label>
+      <button class="ghost" id="xlsx" title="把目前頁籤（含篩選條件）下載成有格式的 Excel；樹狀報表可用 Excel 左上的 1/2/3/4 收合">⬇ 下載 Excel</button>
+      <button class="ghost" id="xlsxAll" title="①～④ 四張報表（依各頁目前的篩選條件）＋資料檢核，放在同一個 Excel">⬇ 全部報表</button>
+      <button class="ghost" id="logout">鎖定</button>
+    </div>
+  </header>
+
+  <!-- 報表一 -->
+  <main id="r1" class="panel">
+    <div class="filters" id="r1Filters"></div>
+    <div class="kpis" id="r1Kpis"></div>
+    <div class="grid-r1">
+      <section class="card">
+        <div class="card-head">
+          <h2>通路 → 前六碼 → 售價（拆組）</h2>
+          <div class="btns"><button class="ghost sm" data-expand="r1">全部展開</button><button class="ghost sm" data-collapse="r1">全部收合</button></div>
+        </div>
+        <div class="tbl-wrap"><table class="tbl" id="r1Table"></table></div>
+      </section>
+      <section class="card side">
+        <div class="card-head"><h2>各通路折扣率</h2></div>
+        <p class="muted small">不受通路篩選影響</p>
+        <div class="tbl-wrap"><table class="tbl" id="r1Side"></table></div>
+      </section>
+    </div>
+    <p class="note">折扣率＝銷貨金額 ÷ 市價；市價＝拆組後數量 × NS 售價（Base Price × 1.05，台幣）。含 0 元贈品，海外通路也用台灣牌價（TW）。</p>
+  </main>
+
+  <!-- 報表二 -->
+  <main id="r2" class="panel" hidden>
+    <div class="filters" id="r2Filters"></div>
+    <section class="card">
+      <div class="card-head">
+        <h2 id="r2AmtTitle">銷售金額</h2>
+        <div class="btns"><button class="ghost sm" data-expand="r2">全部展開</button><button class="ghost sm" data-collapse="r2">全部收合</button></div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl matrix" id="r2Amt"></table></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2 id="r2QtyTitle">銷售數量</h2></div>
+      <div class="tbl-wrap"><table class="tbl matrix" id="r2Qty"></table></div>
+    </section>
+    <p class="note" id="r2Note"></p>
+  </main>
+
+  <!-- 報表三：仿 Excel 樞紐表 -->
+  <main id="r3" class="panel" hidden>
+    <div class="filters" id="r3Filters"></div>
+    <section class="card">
+      <div class="card-head">
+        <h2 id="r3Title">系列別 × 規格前三碼 × 規格前六碼 × 銷貨年月</h2>
+        <div class="btns"><button class="ghost sm" data-collapse="r3">只看系列</button><button class="ghost sm" data-expand="r3p3">展開到前三碼</button>
+          <button class="ghost sm" data-expand="r3">全部展開</button><button class="ghost sm" id="r3Export">⬇ 下載 Excel</button></div>
+      </div>
+      <div class="tbl-wrap"><table class="tbl pivot" id="r3Table"></table></div>
+    </section>
+    <p class="note">點 ⊞ 展開系列或前三碼（像 Excel 群組）。每組第一列「Total」為小計，依總計由大到小排序；沒有資料的月份留空，有資料但加總為 0 顯示 0。下載的 Excel 一律是全部展開。</p>
+  </main>
+
+  <!-- 報表四：By 通路別（仿 Sell in 405） -->
+  <main id="r4" class="panel" hidden>
+    <div class="filters" id="r4Filters"></div>
+    <div class="kpis" id="r4Kpis"></div>
+    <section class="card">
+      <div class="card-head">
+        <h2>By 通路別（可展開至品號）</h2>
+        <div class="btns"><button class="ghost sm" data-collapse="r4">只看通路類別</button><button class="ghost sm" data-expand="r4ch">展開到通路</button>
+          <button class="ghost sm" data-expand="r4ser">展開到系列</button><button class="ghost sm" data-expand="r4">全部展開</button></div>
+      </div>
+      <div class="tbl-wrap tall"><table class="tbl" id="r4Table"></table></div>
+    </section>
+    <p class="note">占比＝占所選範圍本期（前期）總金額；折扣率＝銷貨金額 ÷ 市價（數量 × NS 售價）；本年累計＝本期所在年度 1 月至本期；成長率、折扣率增減為本期 vs 前期。各層依本期金額由大到小排序。</p>
+  </main>
+
+  <!-- 檢核 -->
+  <main id="chk" class="panel" hidden>
+    <div class="kpis" id="chkKpis"></div>
+    <div class="grid-2">
+      <section class="card"><div class="card-head"><h2>組包未拆（NS 沒有 BOM）</h2></div><div class="tbl-wrap"><table class="tbl" id="chkKits"></table></div></section>
+      <section class="card"><div class="card-head"><h2>未對到品號</h2></div><div class="tbl-wrap"><table class="tbl" id="chkItems"></table></div></section>
+      <section class="card"><div class="card-head"><h2>幣別與其他月份不一致</h2></div><div class="tbl-wrap"><table class="tbl" id="chkCur"></table></div>
+        <p class="note">該通路其他月份用外幣、這個月填 NTD／匯率 1，且金額落在外幣的量級（與彙總表不符），疑似原幣直接當台幣。一直以台幣交易的經銷商通路不會列在這裡。請業務確認。</p></section>
+      <section class="card"><div class="card-head"><h2>沒有品項明細的通路</h2></div><div class="tbl-wrap"><table class="tbl" id="chkNoDetail"></table></div>
+        <p class="note">這些通路不在報表內。</p></section>
+      <section class="card"><div class="card-head"><h2>通路調整</h2></div><div class="tbl-wrap"><table class="tbl" id="chkAdj"></table></div>
+        <p class="note">build/通路類別調整.csv（或上傳的「通路別、通路名稱、通路類別、地區、說明」CSV）覆蓋通路對照的通路名稱、通路類別與地區，留空＝不改；備註不變。通路對照沒有的通路別＝新增通路（通路名稱留空＝用通路別）。黃底＝新增的通路別在明細裡找不到（請檢查是否打錯），或同一通路別有多列、這一列被後面的列覆蓋。</p></section>
+    </div>
+    <section class="card"><div class="card-head"><h2>裸瓶對應正貨（拆組後）</h2></div>
+      <div class="tbl-wrap"><table class="tbl" id="chkBare"></table></div>
+      <p class="note">NS 組包 BOM 的成分是裸瓶（半成品）時，拆組後改以對應的正貨品號顯示（品名、系列跟正貨），市價仍用裸瓶（BOM 成分）售價，與業務參考值口徑一致；表中「正貨牌價」僅供參考。黃底＝規格版本不同或找不到正貨，請確認；要手動指定，上傳含「裸瓶品號、正貨品號」兩欄的 CSV（或編輯 build/裸瓶對照.csv）。</p></section>
+    <section class="card"><div class="card-head"><h2>系列歸類不一致（同一前三碼掛在不同系列）</h2></div>
+      <div class="tbl-wrap"><table class="tbl" id="chkSeries"></table></div>
+      <p class="note">依拆組後、有銷售的品項計算。黃底＝不是該前三碼金額最大的系列，多半是 NS 品項的系列欄位掛錯（不是系列改名），請 NS 主檔確認；修正後重新匯出 NS 維度表即可。確認無誤的品號加到 build/系列確認.csv（或上傳含「系列確認品號」欄的 CSV）就不再提醒。</p>
+      <p class="note" id="chkSeriesOk"></p></section>
+  </main>
+
+  <!-- 資料更新 -->
+  <main id="upd" class="panel" hidden>
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head"><h2>目前資料</h2></div>
+        <div id="updInfo"></div>
+        <div class="btns-row">
+          <button type="button" class="ghost sm" id="updDetail">⬇ 下載拆組明細（Excel）</button>
+          <button type="button" class="ghost sm" id="updChannels">⬇ 下載通路對照表</button>
+          <button type="button" class="ghost sm" id="updSeries">⬇ 下載系列對照表</button>
+          <button type="button" class="ghost sm" id="updReset" hidden>還原為線上資料</button>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-head"><h2>① 上傳新資料</h2></div>
+        <label class="drop" id="updDrop">
+          <input type="file" id="updFile" multiple accept=".xlsx,.xlsm,.xls,.csv">
+          <strong>拖曳檔案到這裡，或點一下選擇檔案</strong>
+          <span class="muted small">可一次選多個檔案，只會在這台電腦的瀏覽器裡處理，不會上傳到任何伺服器</span>
+        </label>
+        <ul class="small hint">
+          <li><b>sell-out 明細</b>（必要）：業務每月的《yyyy年度 SellOut 明細表》.xlsx。檔案裡的年度會整年取代，其他年度保留（例：另外上傳含「2025年度」工作表的檔案就能補上 2025）</li>
+          <li><b>通路對照</b>（選用）：明細出現新通路時，先「下載通路對照表」加一列再上傳</li>
+          <li><b>通路調整</b>（選用）：CSV「通路別、通路名稱、通路類別、地區、說明」（同 build/通路類別調整.csv），覆蓋通路對照的通路名稱、通路類別、地區，留空＝不改；通路對照沒有的通路別會新增；上傳新的通路對照時調整照樣套用</li>
+          <li><b>補充 BOM</b>（選用）：CSV「組包品號、成分品號、用量、分攤比例」，NS 沒有 BOM 但要拆的組包（兩種 BOM 模式都會用）</li>
+          <li><b>裸瓶對照</b>（選用）：CSV 兩欄「裸瓶品號、正貨品號」，手動指定拆組後裸瓶要對應的正貨</li>
+          <li><b>系列對照</b>（選用）：NS 系列改名時，下載系列對照表（原系列名稱 → 報表系列名稱）加一列再上傳</li>
+          <li><b>NS 維度表</b>（選用）：匯出程式產生的 D_Item.csv、D_BOM.csv、D_BOM_補.csv</li>
+        </ul>
+        <div id="updPreview" class="preview" hidden></div>
+      </section>
+    </div>
+    <section class="card">
+      <div class="card-head"><h2>② 發布給所有人</h2></div>
+      <p class="small">上傳的資料只在你這個分頁有效（重新整理就會消失）。確認數字沒問題後：</p>
+      <ol class="small hint">
+        <li>按 <button type="button" id="updEnc" class="sm">⬇ 下載加密資料檔 data.enc</button>（用目前的密碼加密）</li>
+        <li>開啟 <a href="https://github.com/DRWUAILAB/sellout-report/upload/main/docs" target="_blank" rel="noopener">GitHub 上傳頁（docs 資料夾）</a>，把 data.enc 拖進去，按「Commit changes」</li>
+        <li>約 1 分鐘後網站更新，所有人重新整理就會看到新資料</li>
+      </ol>
+      <p class="note">也可以在電腦上執行 07_網頁報表\更新報表資料.bat：它會用電腦上的原始資料（03_原始資料_業務提供、NS 匯出、build 資料夾的對照表）整份重建，<b>會取代</b>之前在這裡上傳發布的版本；網頁上傳時用的對照表（通路、通路調整、系列、裸瓶、補充 BOM）如果要保留，請一併放到電腦上的對應檔案。</p>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer" defer></script>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
