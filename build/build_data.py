@@ -43,7 +43,11 @@ def txt(v):
 
 
 def num(v):
-    if v is None or v == "":
+    if isinstance(v, str):
+        v = v.strip().replace(",", "")
+        if v in ("", "-"):   # 「-」＝會計格式的 0（例：202609 馬來西亞贈品列），與網頁端 data.js 一致
+            return 0.0
+    if v is None:
         return 0.0
     return float(v)
 
