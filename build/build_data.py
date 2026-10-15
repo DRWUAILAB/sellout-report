@@ -148,6 +148,22 @@ def load_items(pack, nsdir):
     return items, origin
 
 
+def extra_prices():
+    """補充售價（build/補充售價.csv）→ [[品號, 售價]]；NS 沒有售價的品項才套用（網頁端 buildModel 同規則）。"""
+    f = HERE / "補充售價.csv"
+    if not f.exists():
+        return []
+    return [[txt(r["品號"]), float(str(r["售價"]).replace(",", ""))] for r in read_csv(f)
+            if txt(r["品號"]) and txt(r["售價"])]
+
+
+def apply_extra_prices(items):
+    for code, price in extra_prices():
+        d = items.get(code)
+        if d and not d["price"]:
+            d["price"] = price
+
+
 def extra_bom_pairs():
     f = HERE / "補充BOM.csv"
     if not f.exists():
@@ -289,6 +305,9 @@ def main():
     hist, hist_files = read_history(args.history, fso)
     fso += hist
     items, item_origin = load_items(pack, nsdir)
+    price_extra = extra_prices()
+    items_check = {k: dict(v) for k, v in items.items()}   # 驗算用：套用補充售價（輸出的 items 維持 NS 原值，由網頁套用）
+    apply_extra_prices(items_check)
     channels = {txt(r["通路別"]): r for r in read_table(pack, "D_Channel")}
     ch_name = {k: txt(v["通路名稱"]) for k, v in channels.items()}
     # 通路調整（build/通路類別調整.csv）：原樣放進 data.enc（chAdjust），由網頁端 buildModel 套用，
@@ -321,7 +340,7 @@ def main():
     print(f"F_SO {len(fso)} 列，金額 {sum(r['amt'] for r in fso):,.0f}；D_Item 來源：{item_origin}")
     print(f"拆組前後金額差：NS {sum(r['amt'] for r in fx_ns) - sum(r['amt'] for r in fso):.6f}"
           f"／含暫用 {sum(r['amt'] for r in fx_tmp) - sum(r['amt'] for r in fso):.6f}")
-    c_ns, c_tmp = check(fx_ns, items, ch_name), check(fx_tmp, items, ch_name)
+    c_ns, c_tmp = check(fx_ns, items_check, ch_name), check(fx_tmp, items_check, ch_name)
     print("2026/01 本期折扣率（網站口徑：裸瓶用裸瓶售價）  只用NS BOM（預設）   含暫用BOM")
     for k in sorted(c_ns, key=lambda k: -(c_ns[k][3] or 0)):
         print(f"  {k:<10} {c_ns[k][3] or 0:>16.2%} {c_tmp.get(k, (0, 0, 0, 0))[3] or 0:>14.2%}")
@@ -366,6 +385,7 @@ def main():
                      for r in channels.values()],
         "chAdjust": ch_adjust,
         "so": [[ym, ch, it, cur, round(v[0], 4), round(v[1], 4)] for (ym, ch, it, cur), v in sorted(so.items())],
+        "priceExtra": price_extra,
         "seriesOk": [r["系列確認品號"].strip() for r in read_csv(HERE / "系列確認.csv") if r["系列確認品號"].strip()]
                     if (HERE / "系列確認.csv").exists() else [],
         "bareMap": [[r["裸瓶品號"].strip(), r["正貨品號"].strip()] for r in read_csv(HERE / "裸瓶對照.csv")

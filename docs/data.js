@@ -9,6 +9,7 @@
  *   so       [年月, 通路別, 品號, 幣別, 數量, 台幣金額]（未拆組明細，依前四欄彙總）
  *   seriesMap [原系列名稱, 報表系列名稱]（系列名稱統一）
  *   bareMap  [裸瓶品號, 正貨品號]（手動指定裸瓶對應的正貨；沒指定的自動對應）
+ *   priceExtra [品號, 售價]（補充售價，build/補充售價.csv：NS 沒有售價的品項才套用）
  * items 第 11 欄（索引 10）＝非作用中（T／F）
  * buildModel() 把 RAW 拆組成報表用的索引化事實表（邏輯同 Power Query 01–05 與 build_data.py）。
  */
@@ -83,6 +84,8 @@ window.SO = (() => {
   function buildModel(raw) {
     const normS = seriesNormalizer(raw.seriesMap);
     const itemMap = new Map(raw.items.map(it => { const c = it.slice(); c[5] = normS(c[5]); return [c[0], c]; }));
+    // 補充售價：NS 沒有售價（空白或 0）的品項才套用；NS 補上售價後以 NS 為準
+    for (const [code, price] of raw.priceExtra || []) { const it = itemMap.get(code); if (it && !it[9]) it[9] = price; }
     const isKit = code => itemMap.get(code)?.[7] === "組包";
     const ns = bomMap(raw.bom.ns);
     for (const [k, v] of bomMap(raw.bom.extra || [])) if (!ns.has(k)) ns.set(k, v);   // 補充 BOM：兩種模式都用

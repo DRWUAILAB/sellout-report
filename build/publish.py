@@ -19,7 +19,7 @@ from pathlib import Path
 
 WEB = Path(__file__).resolve().parent.parent
 DATA = "docs/data.enc"
-CONFIG_CSV = ["build/系列對照.csv", "build/裸瓶對照.csv", "build/系列確認.csv", "build/補充BOM.csv", "build/通路類別調整.csv"]
+CONFIG_CSV = ["build/系列對照.csv", "build/裸瓶對照.csv", "build/系列確認.csv", "build/補充BOM.csv", "build/補充售價.csv", "build/通路類別調整.csv"]
 
 
 def git(*args, quiet=False):

@@ -6,6 +6,7 @@ build/password.txt
 !build/裸瓶對照.csv
 !build/系列確認.csv
 !build/補充BOM.csv
+!build/補充售價.csv
 !build/通路類別調整.csv
 *.json
 __pycache__/

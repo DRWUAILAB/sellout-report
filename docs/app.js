@@ -887,6 +887,7 @@
       <tr><td class="l">sell-out 明細</td><td class="l">${esc(RAW.source.sellout)}</td></tr>
       <tr><td class="l">項目主檔</td><td class="l">${esc(RAW.source.item)}・${fmtN(RAW.items.length)} 個品號</td></tr>
       <tr><td class="l">組包 BOM</td><td class="l">NS ${fmtN(new Set(RAW.bom.ns.map(r => r[0])).size)} 個組包・組合單 ${fmtN(new Set(RAW.bom.bu.map(r => r[0])).size)}・暫用 ${fmtN(new Set(RAW.bom.fb.map(r => r[0])).size)}</td></tr>
+      <tr><td class="l">補充售價</td><td class="l">${fmtN((RAW.priceExtra || []).length)} 個品號（NS 沒有售價的才套用）</td></tr>
       <tr><td class="l">系列對照</td><td class="l">${fmtN((RAW.seriesMap || []).length)} 筆（名稱統一，去掉「系列」）</td></tr>
       <tr><td class="l">通路對照</td><td class="l">${fmtN(RAW.channels.length)} 個通路別・通路調整 ${fmtN((RAW.chAdjust || []).length)} 筆</td></tr>
       <tr><td class="l">期間</td><td class="l">${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}（${[...byYear].map(([y, a]) => `${y} 年 ${fmtN(a)} 元`).join("、")}）</td></tr>
@@ -941,6 +942,9 @@
         } else if (keys.includes("原系列名稱") && keys.includes("報表系列名稱")) {
           next.seriesMap = recs.map(r => [r["原系列名稱"].trim(), r["報表系列名稱"].trim()]).filter(r => r[0] && r[1]);
           log.push(`系列對照「${name}」：${next.seriesMap.length} 筆`);
+        } else if (keys.includes("品號") && keys.includes("售價")) {
+          next.priceExtra = recs.map(r => [r["品號"].trim(), +String(r["售價"]).replace(/,/g, "")]).filter(r => r[0] && r[1] > 0);
+          log.push(`補充售價「${name}」：${next.priceExtra.length} 個品號（NS 沒有售價的才套用）`);
         } else if (SO.isChAdjust(recs.header)) {   // 要在通路對照之前判斷（兩者都有通路別、通路名稱）；只有標題列＝清空調整表
           if (!recs.header.includes("通路名稱") && !recs.header.includes("通路類別")) throw new Error(`${name}：通路調整要有「通路名稱」或「通路類別」欄`);
           next.chAdjust = recs.map(r => ["通路別", "通路名稱", "通路類別", "地區", "說明"].map(k => (r[k] || "").trim() || null)).filter(r => r[0]);
