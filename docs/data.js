@@ -90,6 +90,11 @@ window.SO = (() => {
     for (const [k, v] of bomMap(raw.bom.bu)) if (!tmp.has(k)) tmp.set(k, v);
     const nsBu = new Set(tmp.keys());
     for (const [k, v] of bomMap(raw.bom.fb)) if (!nsBu.has(k)) tmp.set(k, v);
+    // 拆不了的促銷組（哪種 BOM 都沒有，例：刷具組、口罩）不顯示「組合包」，前三碼、前六碼改顯示「=」前的代碼（PA240601=… → PA240601）
+    for (const [code, it] of itemMap) {
+      if (it[3] !== "組合包" || tmp.has(code)) continue;
+      it[3] = it[4] = (String(it[2]).match(/^[A-Za-z]*\d+/) || [it[2]])[0];
+    }
 
     // 未拆組：依 年月、通路、品號 彙總
     const yms = [...new Set(raw.so.map(r => r[0]))].sort();
