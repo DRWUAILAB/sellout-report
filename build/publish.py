@@ -64,11 +64,15 @@ def sync():
             print(f"本機有 {len(ahead)} 個還沒推上去、只改 data.enc 的 commit，這次會重建，先捨棄。")
             git("reset", "--soft", "origin/main")
             git("checkout", "origin/main", "--", DATA)
+    stashes = len(git("stash", "list", quiet=True).stdout.splitlines())
     if git("pull", "--rebase", "--autostash").returncode:
         if (WEB / ".git" / "rebase-merge").exists() or (WEB / ".git" / "rebase-apply").exists():
             git("rebase", "--abort")
             fail("本機 commit 和 GitHub 上的版本衝突（不只 data.enc），已取消同步，沒有發布。請找維護的人處理 git 衝突。")
         fail("無法從 GitHub 取得最新版本（網路或登入問題？），沒有發布。")
+    # autostash 放回本機修改時衝突，git 仍回傳成功、把修改留在 stash：停下來，不要在缺修改的狀態下發布
+    if len(git("stash", "list", quiet=True).stdout.splitlines()) > stashes:
+        fail("本機未 commit 的修改和 GitHub 上的版本衝突，修改已暫存在 git stash（用 git stash list 查看），沒有發布。請找維護的人處理。")
 
 
 def main():

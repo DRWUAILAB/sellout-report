@@ -9,3 +9,4 @@ build/password.txt
 !build/通路類別調整.csv
 *.json
 __pycache__/
+.DS_Store
