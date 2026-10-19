@@ -47,7 +47,7 @@
   // Redermx 分開顯示的通路（同業務《2026市場綜合折扣率》的拆法；其他通路的 Redermx 商品仍併在原通路）
   // 依通路名稱判斷，通路調整改名後仍用通路對照原本的名稱比對（channels 第 5 欄）
   const RX_SPLIT = new Set(["官網", "BR4/A13", "英爵診所"]);
-  // 未分類（系列 其他、通路類別 未分類、代碼／劑型 (無)）一律排在最後；其餘維持原本的排序
+  // 未分類（系列／代碼 其他、通路類別 未分類、存貨型態／劑型 (無)）一律排在最後；其餘維持原本的排序
   const isUncat = label => /^[（(]?(未分類|無)[)）]?$|^其他$/.test(String(label ?? "").trim());
   const uncatLast = arr => arr.filter(x => !isUncat(x?.label ?? x)).concat(arr.filter(x => isUncat(x?.label ?? x)));
 
@@ -244,7 +244,7 @@
       if (!ch.has(base)) continue;
       // 通路 → 前六碼＋售價（售價單獨一欄；同一前六碼有多個售價時各佔一列）
       const n1 = child(root, cn, cn, "", 6);
-      const p6 = it[I.P6] || NONE;
+      const p6 = it[I.P6] || "其他";
       const n2 = child(n1, p6 + "\u0002" + price, p6, "", 6);
       n2.price = price;
       const path = [n1, n2];
@@ -381,7 +381,7 @@
     const tot = { amt: new Array(nC).fill(null), qty: new Array(nC).fill(null) };
     for (const [ii, a] of byItem) {
       const it = D.items[ii];
-      const p3 = it[I.P3] || NONE, p6 = it[I.P6] || NONE;
+      const p3 = it[I.P3] || "其他", p6 = it[I.P6] || "其他";
       const ser = it[I.SERIES] || "其他";
       for (const m of ["amt", "qty"]) {
         const vals = series(a[m], a.n);
@@ -451,7 +451,7 @@
       const it = D.items[r[2]];
       if (brand !== "全部" && it[I.BRAND] !== brand) continue;
       const v = unsplit ? (isAmt ? r[4] : r[3]) : (isAmt ? r[7] : r[6]);
-      const ser = it[I.SERIES] || "其他", p3 = it[I.P3] || NONE, p6 = it[I.P6] || NONE;
+      const ser = it[I.SERIES] || "其他", p3 = it[I.P3] || "其他", p6 = it[I.P6] || "其他";
       const n1 = child(root, ser, ser, "", nC), n2 = child(n1, p3, p3, "", nC), n3 = child(n2, p6, p6, "", nC);
       bump([n1, n2, n3, grand], k, v);
       bump([n1, n2, n3, grand], nC - 1, v);
