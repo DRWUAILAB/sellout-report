@@ -47,8 +47,8 @@
   // Redermx 分開顯示的通路（同業務《2026市場綜合折扣率》的拆法；其他通路的 Redermx 商品仍併在原通路）
   // 依通路名稱判斷，通路調整改名後仍用通路對照原本的名稱比對（channels 第 5 欄）
   const RX_SPLIT = new Set(["官網", "BR4/A13", "英爵診所"]);
-  // 未分類（系列 (未分類)、通路類別 未分類、代碼／劑型 (無)）一律排在最後；其餘維持原本的排序
-  const isUncat = label => /^[（(]?(未分類|無)[)）]?$/.test(String(label ?? "").trim());
+  // 未分類（系列 其他、通路類別 未分類、代碼／劑型 (無)）一律排在最後；其餘維持原本的排序
+  const isUncat = label => /^[（(]?(未分類|無)[)）]?$|^其他$/.test(String(label ?? "").trim());
   const uncatLast = arr => arr.filter(x => !isUncat(x?.label ?? x)).concat(arr.filter(x => isUncat(x?.label ?? x)));
 
   function prepare(d) {
@@ -382,7 +382,7 @@
     for (const [ii, a] of byItem) {
       const it = D.items[ii];
       const p3 = it[I.P3] || NONE, p6 = it[I.P6] || NONE;
-      const ser = it[I.SERIES] || "(未分類)";
+      const ser = it[I.SERIES] || "其他";
       for (const m of ["amt", "qty"]) {
         const vals = series(a[m], a.n);
         if (vals.every(v => v == null)) continue;   // 所選月份沒有資料的品號不列出（避免整列空白）
@@ -451,7 +451,7 @@
       const it = D.items[r[2]];
       if (brand !== "全部" && it[I.BRAND] !== brand) continue;
       const v = unsplit ? (isAmt ? r[4] : r[3]) : (isAmt ? r[7] : r[6]);
-      const ser = it[I.SERIES] || "(未分類)", p3 = it[I.P3] || NONE, p6 = it[I.P6] || NONE;
+      const ser = it[I.SERIES] || "其他", p3 = it[I.P3] || NONE, p6 = it[I.P6] || NONE;
       const n1 = child(root, ser, ser, "", nC), n2 = child(n1, p3, p3, "", nC), n3 = child(n2, p6, p6, "", nC);
       bump([n1, n2, n3, grand], k, v);
       bump([n1, n2, n3, grand], nC - 1, v);
@@ -728,7 +728,7 @@
       if (brand !== "全部" && it[I.BRAND] !== brand) continue;
       if (!inv.has(it[I.INV] || NONE)) continue;
       const qty = unsplit ? r[3] : r[6], amt = unsplit ? r[4] : r[7], mkt = qty * D.price[r[2]];
-      const ser = it[I.SERIES] || "(未分類)";
+      const ser = it[I.SERIES] || "其他";
       const n1 = child(root, cc, cc, "", 9), n2 = child(n1, cn, cn, "", 9), n3 = child(n2, ser, ser, "", 9);
       const n4 = child(n3, it[I.CODE], it[I.CODE], [it[I.NAME], it[I.SPEC]].filter(Boolean).join("　"), 9);
       hits.forEach((h, k) => {
