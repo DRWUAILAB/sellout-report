@@ -93,9 +93,12 @@ window.SO = (() => {
     for (const [k, v] of bomMap(raw.bom.bu)) if (!tmp.has(k)) tmp.set(k, v);
     const nsBu = new Set(tmp.keys());
     for (const [k, v] of bomMap(raw.bom.fb)) if (!nsBu.has(k)) tmp.set(k, v);
-    // NS／補充 BOM 都沒有、預設模式拆不了的組包（福袋、禮盒、贈品組、刷具組…）：系列、前三碼、前六碼一律歸「其他」
+    // NS／補充 BOM 都沒有、預設模式拆不了的組包（福袋、禮盒、贈品組、刷具組…）：系列歸「其他」；前三碼、前六碼也歸「其他」，但沒有產品代碼的留空（報表顯示商品名稱）
     for (const [code, it] of itemMap) {
-      if (it[7] === "組包" && !ns.has(code)) it[3] = it[4] = it[5] = "其他";
+      if (it[7] !== "組包" || ns.has(code)) continue;
+      it[5] = "其他";
+      if (it[3]) it[3] = "其他";
+      if (it[4]) it[4] = "其他";
     }
 
     // 未拆組：依 年月、通路、品號 彙總
