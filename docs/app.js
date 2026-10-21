@@ -43,7 +43,8 @@
   let D = null;
   const I = { CODE: 0, NAME: 1, SPEC: 2, P3: 3, P6: 4, SERIES: 5, DOSAGE: 6, INV: 7, BRAND: 8, PRICE: 9 };
   // 沒有產品代碼的品項：前三碼歸「其他」，前六碼顯示商品名稱（沒有品名時用品號）
-  const codeOr = (it, k) => it[k] || it[I.NAME] || it[I.CODE] || "其他";
+  const nameOf = it => it[I.NAME] || it.soName || "";   // 項目主檔沒有的品號用銷售明細的品名
+  const codeOr = (it, k) => it[k] || nameOf(it) || it[I.CODE] || "其他";
   const NONE = "(無)";
   const RX = "-Redermx";
   // Redermx 分開顯示的通路（同業務《2026市場綜合折扣率》的拆法；其他通路的 Redermx 商品仍併在原通路）
@@ -389,7 +390,7 @@
         const vals = series(a[m], a.n);
         if (vals.every(v => v == null)) continue;   // 所選月份沒有資料的品號不列出（避免整列空白）
         const n1 = child(trees[m], ser, ser, "", nC), n2 = child(n1, p3, p3, "", nC), n3 = child(n2, p6, p6, "", nC);
-        const n4 = child(n3, it[I.CODE], it[I.CODE], it[I.NAME] || "", nC);
+        const n4 = child(n3, it[I.CODE], it[I.CODE], nameOf(it), nC);
         vals.forEach((v, j) => {
           if (v == null) return;
           bump([n1, n2, n3, n4], j, v);
@@ -732,7 +733,7 @@
       const qty = unsplit ? r[3] : r[6], amt = unsplit ? r[4] : r[7], mkt = qty * D.price[r[2]];
       const ser = it[I.SERIES] || "其他";
       const n1 = child(root, cc, cc, "", 9), n2 = child(n1, cn, cn, "", 9), n3 = child(n2, ser, ser, "", 9);
-      const n4 = child(n3, it[I.CODE], it[I.CODE], [it[I.NAME], it[I.SPEC]].filter(Boolean).join("　"), 9);
+      const n4 = child(n3, it[I.CODE], it[I.CODE], [nameOf(it), it[I.SPEC]].filter(Boolean).join("　"), 9);
       hits.forEach((h, k) => {
         if (!h) return;
         const path = [n1, n2, n3, n4, tot];
@@ -828,7 +829,7 @@
     const listTable = (map, empty) => {
       const rows = [...map.entries()].sort((a, b) => b[1][1] - a[1][1]);
       return `<thead><tr><th class="l">品號</th><th class="l">品名</th><th>數量</th><th>台幣金額</th></tr></thead><tbody>` +
-        (rows.map(([i, a]) => `<tr><td class="l">${esc(D.items[i][I.CODE])}</td><td class="l">${esc(D.items[i][I.NAME] || "")}</td><td>${fmtN(a[0])}</td><td>${fmtN(a[1])}</td></tr>`).join("")
+        (rows.map(([i, a]) => `<tr><td class="l">${esc(D.items[i][I.CODE])}</td><td class="l">${esc(nameOf(D.items[i]))}</td><td>${fmtN(a[0])}</td><td>${fmtN(a[1])}</td></tr>`).join("")
           || `<tr><td colspan="4" class="empty">${empty}</td></tr>`) + "</tbody>";
     };
     $("#chkKits").innerHTML = listTable(kits, "沒有未拆的組包");
@@ -907,7 +908,8 @@
         if (!window.XLSX) throw new Error("Excel 元件還在載入，請稍候再試");
         const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
         if (wb.SheetNames.some(n => /^\d{4}年度$/.test(n))) {
-          const { rows, years, emptyYears } = SO.parseSellout(wb);
+          const { rows, years, emptyYears, names } = SO.parseSellout(wb);
+          next.soNames = { ...(next.soNames || {}), ...names };
           const bad = rows.filter(r => !/^\d{6}$/.test(r[0] || ""));
           if (bad.length) throw new Error(`${name}：有 ${bad.length} 列「日期」不是 YYYYMM（例：${bad[0][0]}）`);
           soNew.push(...rows);

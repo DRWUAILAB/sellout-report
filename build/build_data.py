@@ -76,6 +76,7 @@ def read_sellout(path, skip_years=()):
                 "qty": num(r[ix["銷售數量"]]),
                 "amt": num(r[ix["台幣金額"]]),
                 "cur": txt(r[ix["幣別"]]) if "幣別" in ix else None,
+                "name": txt(r[ix["DRWU品名"]]) if "DRWU品名" in ix else None,
             })
     return rows
 
@@ -367,6 +368,10 @@ def main():
     fb_pairs = [(txt(r["組包品號"]), txt(r["成分品號"]), r["用量"], r["分攤比例"]) for r in read_table(pack, "D_BOM_暫用")]
 
     so = defaultdict(lambda: [0.0, 0.0])
+    so_names = {}   # 項目主檔沒有的品號：用銷售明細的品名（取最近月份的）顯示
+    for r in sorted(fso, key=lambda r: r["ym"] or ""):
+        if r.get("name") and r["item"] not in items:
+            so_names[r["item"]] = r["name"]
     for r in fso:
         a = so[(r["ym"], r["ch"], r["item"], r["cur"] or "")]
         a[0] += r["qty"]; a[1] += r["amt"]
@@ -385,6 +390,7 @@ def main():
                      for r in channels.values()],
         "chAdjust": ch_adjust,
         "so": [[ym, ch, it, cur, round(v[0], 4), round(v[1], 4)] for (ym, ch, it, cur), v in sorted(so.items())],
+        "soNames": so_names,
         "priceExtra": price_extra,
         "seriesOk": [r["系列確認品號"].strip() for r in read_csv(HERE / "系列確認.csv") if r["系列確認品號"].strip()]
                     if (HERE / "系列確認.csv").exists() else [],

@@ -112,7 +112,13 @@ window.SO = (() => {
       if (i === undefined) {
         i = items.length;
         itemIx.set(code, i);
-        items.push(itemMap.get(code) || [code, null, null, null, null, null, null, null, null, null]);
+        let it = itemMap.get(code);
+        if (!it) {
+          // 項目主檔沒有的品號：品名留空（資料檢核算「未對到品號」），顯示用銷售明細的品名
+          it = [code, null, null, null, null, null, null, null, null, null];
+          it.soName = (raw.soNames || {})[code] || null;
+        }
+        items.push(it);
       }
       return i;
     };
@@ -218,8 +224,8 @@ window.SO = (() => {
 
   // sell-out 明細：所有「yyyy年度」工作表，第 1 列小計、第 2 列標題（同 Power Query 01）
   function parseSellout(wb) {
-    const rows = [], years = [], emptyYears = [];
-    for (const name of wb.SheetNames) {
+    const rows = [], years = [], emptyYears = [], names = {};
+    for (const name of [...wb.SheetNames].sort()) {   // 年度由舊到新：同品號取最新年度的品名
       if (!/^\d{4}年度$/.test(name)) continue;
       const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
       const hdr = (aoa[1] || []).map(h => txt(h));
@@ -231,13 +237,14 @@ window.SO = (() => {
       for (const r of aoa.slice(2)) {
         const item = txt(r[c("DRWU品號")]);
         if (!item) continue;
+        if (c("DRWU品名") >= 0 && txt(r[c("DRWU品名")])) names[item] = txt(r[c("DRWU品名")]);
         rows.push([txt(r[c("日期")]), txt(r[c("通路別")]), item, c("幣別") >= 0 ? txt(r[c("幣別")]) || "" : "",
           num(r[c("銷售數量")]), num(r[c("台幣金額")])]);
       }
       // 只有標題、沒有資料列的年度不算（避免上傳空白範本把整年清掉）
       (rows.length > before ? years : emptyYears).push(name.slice(0, 4));
     }
-    return { rows, years, emptyYears };
+    return { rows, years, emptyYears, names };
   }
 
   // 通路調整表（通路別,通路名稱,通路類別,地區,說明）也有「通路別、通路名稱」，用「說明」且沒有「備註」來區分
