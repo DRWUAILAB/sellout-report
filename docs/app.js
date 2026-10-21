@@ -246,11 +246,19 @@
       if (inC) { s[2] += amt; s[3] += mkt; sideTot[2] += amt; sideTot[3] += mkt; }
       if (!ch.has(base)) continue;
       // 通路 → 前六碼＋售價（售價單獨一欄；同一前六碼有多個售價時各佔一列）
+      // 沒有產品代碼的品項與拆不了的組包：歸在前六碼「其他」底下，下一層顯示商品名稱＋售價
       const n1 = child(root, cn, cn, "", 6);
-      const p6 = codeOr(it, I.P6);
-      const n2 = child(n1, p6 + "\u0002" + price, p6, "", 6);
-      n2.price = price;
-      const path = [n1, n2];
+      const path = [n1];
+      if (it[I.P6] && it[I.P6] !== "其他") {
+        const n2 = child(n1, it[I.P6] + "\u0002" + price, it[I.P6], "", 6);
+        n2.price = price;
+        path.push(n2);
+      } else {
+        const n2 = child(n1, "其他", "其他", "", 6), nm = nameOf(it) || it[I.CODE];
+        const n3 = child(n2, nm + "\u0002" + price, nm, "", 6);
+        n3.price = price;
+        path.push(n2, n3);
+      }
       for (const [hit, off] of [[inP, 0], [inC, 3]]) {
         if (!hit) continue;
         bump(path, off, qty); bump(path, off + 1, amt); bump(path, off + 2, mkt);
@@ -289,9 +297,9 @@
     const sortKids = (arr, depth) => depth === 0
       ? arr.sort((a, b) => (div(b.v[4], b.v[5]) ?? -1) - (div(a.v[4], a.v[5]) ?? -1))
       : arr.sort((a, b) => a.label.localeCompare(b.label) || a.price - b.price);
-    const body = treeRows(root, 0, S.open.r1, sortKids, cells, 1);
+    const body = treeRows(root, 0, S.open.r1, sortKids, cells, 2);
     $("#r1Table").innerHTML = `<thead>
-      <tr class="grp"><th class="l" rowspan="2">通路名稱 / 前六碼</th><th rowspan="2">售價</th><th colspan="4" class="sep">前期 ${pl}</th><th colspan="4" class="sep">本期 ${cl}</th></tr>
+      <tr class="grp"><th class="l" rowspan="2">通路名稱 / 前六碼 / 品名</th><th rowspan="2">售價</th><th colspan="4" class="sep">前期 ${pl}</th><th colspan="4" class="sep">本期 ${cl}</th></tr>
       <tr><th class="sep">銷貨數量</th><th>銷貨金額</th><th>市價</th><th>折扣率</th><th class="sep">銷貨數量</th><th>銷貨金額</th><th>市價</th><th>折扣率</th></tr></thead>
       <tbody>${body || `<tr><td colspan="10" class="empty">沒有符合條件的資料</td></tr>`}</tbody>
       <tfoot><tr class="total"><td class="l">總計</td><td></td>${[0, 3].map(off => totC[off / 3]
@@ -511,18 +519,18 @@
   function buildR1() {
     const { root, tot, totC, sideRows, sideTot, pl, cl, sortKids, warn, pre, cur } = r1Last;
     const four = (v, has, off) => (has ? [v[off], v[off + 1], v[off + 2], div(v[off + 1], v[off + 2]) ?? ""] : ["", "", "", ""]);
-    const flat = flatten(root, 1, sortKids);
+    const flat = flatten(root, 2, sortKids);
     const hi = new Set();
     const aoa = [
-      ["", "", "", `前期 ${pl}`, "", "", "", `本期 ${cl}`, "", "", ""],
-      ["通路名稱", "前六碼", "售價", "銷貨數量", "銷貨金額", "市價", "折扣率", "銷貨數量", "銷貨金額", "市價", "折扣率"],
+      ["", "", "", "", `前期 ${pl}`, "", "", "", `本期 ${cl}`, "", "", ""],
+      ["通路名稱", "前六碼", "品名", "售價", "銷貨數量", "銷貨金額", "市價", "折扣率", "銷貨數量", "銷貨金額", "市價", "折扣率"],
       ...flat.map(({ nd, lv }, i) => {
         const chLabel = nd.key.split("")[1];   // 前六碼列也跟網頁一樣，依所屬通路標黃
-        if (warn(chLabel, pre)) hi.add(`${i + 2},6`);
-        if (warn(chLabel, cur)) hi.add(`${i + 2},10`);
-        return [...labelRow(2, lv, nd.label), nd.price ?? "", ...four(nd.v, nd.c[0] > 0, 0), ...four(nd.v, nd.c[3] > 0, 3)];
+        if (warn(chLabel, pre)) hi.add(`${i + 2},7`);
+        if (warn(chLabel, cur)) hi.add(`${i + 2},11`);
+        return [...labelRow(3, lv, nd.label), nd.price ?? "", ...four(nd.v, nd.c[0] > 0, 0), ...four(nd.v, nd.c[3] > 0, 3)];
       }),
-      ["總計", "", "", ...four(tot, totC[0] > 0, 0), ...four(tot, totC[1] > 0, 3)],
+      ["總計", "", "", "", ...four(tot, totC[0] > 0, 0), ...four(tot, totC[1] > 0, 3)],
     ];
     const sideHi = new Set();
     sideRows.forEach(([k], i) => { if (warn(k, pre)) sideHi.add(`${i + 1},1`); if (warn(k, cur)) sideHi.add(`${i + 1},2`); });
@@ -532,8 +540,8 @@
       file: `SellOut_市場綜合折扣率_${cl.replace(/\//g, "")}_${stamp()}.xlsx`, cond,
       sheets: [
         { name: "①市場綜合折扣率", aoa, head: 2, total: true, hi, freeze: 2, freezeCols: 1,
-          levels: [null, null, ...flat.map(f => f.lv), null], merges: [[1, 4, 1, 7], [1, 8, 1, 11]],
-          fmt: (r, c) => (r < 2 ? null : c === 6 || c === 10 ? PCT : NUM), cols: [14, 10, 8, 10, 14, 14, 9, 10, 14, 14, 9] },
+          levels: [null, null, ...flat.map(f => f.lv), null], merges: [[1, 5, 1, 8], [1, 9, 1, 12]],
+          fmt: (r, c) => (r < 2 ? null : c === 7 || c === 11 ? PCT : NUM), cols: [14, 10, 30, 8, 10, 14, 14, 9, 10, 14, 14, 9] },
         { name: "①各通路折扣率", head: 1, total: true, hi: sideHi, fmt: r => (r ? PCT : null), cols: [14, 14, 14],
           aoa: [["通路名稱", `前期 ${pl}`, `本期 ${cl}`], ...sideRows.map(([k, p, c]) => [k, p ?? "", c ?? ""]),
             ["總計", div(sideTot[0], sideTot[1]) ?? "", div(sideTot[2], sideTot[3]) ?? ""]] },
