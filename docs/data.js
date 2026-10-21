@@ -93,7 +93,7 @@ window.SO = (() => {
     for (const [k, v] of bomMap(raw.bom.bu)) if (!tmp.has(k)) tmp.set(k, v);
     const nsBu = new Set(tmp.keys());
     for (const [k, v] of bomMap(raw.bom.fb)) if (!nsBu.has(k)) tmp.set(k, v);
-    // NS／補充 BOM 都沒有、預設模式拆不了的組包（福袋、禮盒、贈品組、刷具組…）：系列歸「其他」；前三碼、前六碼也歸「其他」，但沒有產品代碼的留空（報表顯示商品名稱）
+    // NS／補充 BOM 都沒有、預設模式拆不了的組包（福袋、禮盒、贈品組、刷具組…）：系列歸「其他」；前三碼、前六碼也歸「其他」，但沒有產品代碼的留空（報表前三碼歸「其他」、前六碼顯示商品名稱）
     for (const [code, it] of itemMap) {
       if (it[7] !== "組包" || ns.has(code)) continue;
       it[5] = "其他";

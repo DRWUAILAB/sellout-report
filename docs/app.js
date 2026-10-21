@@ -42,7 +42,7 @@
   // ------------------------------------------------------------ 資料
   let D = null;
   const I = { CODE: 0, NAME: 1, SPEC: 2, P3: 3, P6: 4, SERIES: 5, DOSAGE: 6, INV: 7, BRAND: 8, PRICE: 9 };
-  // 沒有前三碼／前六碼（產品代碼空白）的品項：該欄顯示商品名稱（沒有品名時用品號）
+  // 沒有產品代碼的品項：前三碼歸「其他」，前六碼顯示商品名稱（沒有品名時用品號）
   const codeOr = (it, k) => it[k] || it[I.NAME] || it[I.CODE] || "其他";
   const NONE = "(無)";
   const RX = "-Redermx";
@@ -383,7 +383,7 @@
     const tot = { amt: new Array(nC).fill(null), qty: new Array(nC).fill(null) };
     for (const [ii, a] of byItem) {
       const it = D.items[ii];
-      const p3 = codeOr(it, I.P3), p6 = codeOr(it, I.P6);
+      const p3 = it[I.P3] || "其他", p6 = codeOr(it, I.P6);
       const ser = it[I.SERIES] || "其他";
       for (const m of ["amt", "qty"]) {
         const vals = series(a[m], a.n);
@@ -413,7 +413,7 @@
     $("#r2AmtTitle").innerHTML = `銷售金額（台幣）<span class="tag">${tag}</span>`;
     $("#r2QtyTitle").innerHTML = `銷售數量<span class="tag">${tag}</span>`;
     $("#r2Note").innerHTML = (unsplit
-      ? "未拆組：組包以自身的系列、產品代碼計算；促銷組（PB／PA／PT）的前三碼、前六碼顯示「組合包」；NS 沒有 BOM、拆不了的組包（福袋、禮盒、贈品組等）的系列、前三碼、前六碼歸「其他」；沒有產品代碼的品項，前三碼、前六碼顯示商品名稱。"
+      ? "未拆組：組包以自身的系列、產品代碼計算；促銷組（PB／PA／PT）的前三碼、前六碼顯示「組合包」；NS 沒有 BOM、拆不了的組包（福袋、禮盒、贈品組等）的系列、前三碼、前六碼歸「其他」；沒有產品代碼的品項歸在前三碼「其他」底下，前六碼顯示商品名稱。"
       : "拆組：組包依 NS BOM 拆成成分，數量 × 用量、金額依「成分售價 × 用量」比例分攤；拆組不改變總金額。") +
       (view === "年累計" ? " 年累計＝該年 1 月至當月（不受月份篩選影響），還沒有資料的月份留空。" : " 合計＝所選月份加總。") +
       ` 部分海外月份幣別與其他月份不一致，含海外時請參考「資料檢核」。`;
@@ -453,7 +453,7 @@
       const it = D.items[r[2]];
       if (brand !== "全部" && it[I.BRAND] !== brand) continue;
       const v = unsplit ? (isAmt ? r[4] : r[3]) : (isAmt ? r[7] : r[6]);
-      const ser = it[I.SERIES] || "其他", p3 = codeOr(it, I.P3), p6 = codeOr(it, I.P6);
+      const ser = it[I.SERIES] || "其他", p3 = it[I.P3] || "其他", p6 = codeOr(it, I.P6);
       const n1 = child(root, ser, ser, "", nC), n2 = child(n1, p3, p3, "", nC), n3 = child(n2, p6, p6, "", nC);
       bump([n1, n2, n3, grand], k, v);
       bump([n1, n2, n3, grand], nC - 1, v);
