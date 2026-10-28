@@ -1,10 +1,11 @@
 """
 Sell-out 網頁報表：重建加密資料並發布到 GitHub（更新報表資料.bat 呼叫這支）
 
-步驟：同步 GitHub → build_data.py → commit（docs/data.enc 與 build/ 的對照表 CSV）→ push。
+步驟：同步 GitHub → build_data.py → commit（docs/data.enc、docs/api 中繼表與 build/ 的對照表 CSV）→ push。
 任何一步失敗都會停下來並說明原因，不會顯示「完成」。
 
-- data.enc 每次加密都用新的隨機值，所以改用「解密後的內容」判斷有沒有變化（不含建置時間），內容相同就不發布。
+- data.enc 每次加密都用新的隨機值，所以改用「解密後的內容」判斷有沒有變化（不含建置時間），內容相同就不發布；
+  docs/api 的中繼表由同一份內容產生，data.enc 沒變時一併還原。
 - build/ 的對照表（系列對照、裸瓶對照、系列確認、補充BOM、通路類別調整）有修改時一起 commit，換電腦也不會遺失。
 - data.enc 由本機的原始資料重建；有人在網頁「資料更新」上傳發布過的版本會被這次的結果取代。
 """
@@ -19,6 +20,7 @@ from pathlib import Path
 
 WEB = Path(__file__).resolve().parent.parent
 DATA = "docs/data.enc"
+API = "docs/api"
 CONFIG_CSV = ["build/系列對照.csv", "build/裸瓶對照.csv", "build/系列確認.csv", "build/補充BOM.csv", "build/補充售價.csv", "build/通路類別調整.csv"]
 
 
@@ -84,13 +86,17 @@ def main():
     step("[2/4] 重建加密資料 docs/data.enc")
     if subprocess.run([sys.executable, str(WEB / "build" / "build_data.py")], cwd=WEB).returncode:
         fail("建置失敗，請看上方訊息，沒有發布。")
-    step("[3/4] 建立 commit（docs/data.enc、build/ 對照表）")
+    step("[3/4] 建立 commit（docs/data.enc、docs/api 中繼表、build/ 對照表）")
     paths = []
     if before is not None and before == content_digest(WEB / DATA):
         git("checkout", "--", DATA)   # 內容沒變：還原成原本的檔案，不產生沒有意義的 commit
+        tracked = [f for f in git("ls-files", "--", API, quiet=True).stdout.split() if not f.endswith(".py")]
+        if tracked:
+            git("checkout", "--", *tracked)   # 中繼表同樣還原（加密值與建置時間不同，內容相同）
         print("報表資料內容沒有變化。")
     else:
         paths.append(DATA)
+    paths.append(API)   # 第一次發布中繼表、或取數程式 sellout_api.py 有修改時一起 commit
     paths += [p for p in CONFIG_CSV if (WEB / p).exists()]
     if git("add", "--", *paths).returncode:
         fail("git add 失敗，沒有發布。")

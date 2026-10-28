@@ -57,6 +57,38 @@ NS 沒有售價、但業務計算市價時有計價的品項，寫在 `build/補
 
 報表的系列名稱一律用 `build/系列對照.csv` 統一（例：NS 的「玻尿酸」「玻尿酸保濕系列」→ 玻尿酸保濕；「潤透光美白系列」已更名 → 超微C美白）；對照表沒有的名稱自動去掉結尾「系列」。NS 系列改名時在這張表加一列，或在網頁「資料更新」下載系列對照表、修改後上傳。
 
+## 中繼表與 API
+
+`build/build_data.py` 建置時另外輸出整理好的中繼表（2026-10-28 起；`--no-inter` 可略過）：
+
+| 代號 | 名稱 | 內容 |
+| --- | --- | --- |
+| `so` | 未拆組明細 | 年月 × 通路別 × 品號 × 幣別的數量、台幣金額（2019–2025 歷史＋2026 業務明細），附通路名稱／類別／地區與品名、前三碼、前六碼、系列、劑型、存貨型態、品牌、售價；「對到品號」N＝項目主檔沒有，品名用銷售明細的 |
+| `item` | 品項主檔 | 系列名稱已統一（另附 NS 原系列）、已套用補充售價（「售價來源」標示）；NS／補充 BOM 都沒有的組包系列與前三碼、前六碼歸「其他」 |
+| `channel` | 通路對照 | D_Channel 套用通路類別調整後的結果（「調整說明」標示新增通路與調整原因） |
+| `bom` | 拆組表 | 實際使用的 BOM 列與來源（NS BOM、補充BOM＝預設；組合單推BOM、代碼拆解暫用＝只在含暫用 BOM 時使用） |
+
+口徑與網頁報表相同（同一份 data.enc 內容、同 `data.js` 的維度規則）；尚未拆組，拆組後明細請用網頁「資料更新」的下載。只有月資料，沒有每日數字。
+
+- **本機 CSV**：`SellOut報表/09_中繼表/*.csv`（明文，含 BOM，Excel 可直接開；不進版控）
+- **API**：`docs/api/<代號>.enc`（加密，格式同 data.enc、內容是 gzip CSV，密碼同網頁報表）與 `docs/api/index.json`（表清單，不含資料），隨 `更新報表資料.bat` 一起發布到 GitHub Pages：`https://drwuailab.github.io/sellout-report/api/`
+
+取數用 `docs/api/sellout_api.py`（需要 `cryptography`；`fetch_df` 另需 `pandas`），網站上也可直接下載：
+
+```bash
+curl -O https://drwuailab.github.io/sellout-report/api/sellout_api.py
+python sellout_api.py --list                       # 表清單、列數、建置時間
+python sellout_api.py so -o 未拆組明細.csv           # 密碼：環境變數 SELLOUT_PASSWORD，沒有就詢問
+```
+
+```python
+from sellout_api import fetch, fetch_df
+rows = fetch("so")             # list[dict]，數值欄已轉 float
+df = fetch_df("item")          # pandas DataFrame，品號等代碼欄保持文字
+```
+
+注意：網頁「資料更新」上傳發布的只有 data.enc，中繼表不會跟著更新；要更新中繼表請用本機程式（方法二）。換密碼後中繼表也改用新密碼。
+
 ## 每月更新
 
 **方法一：網頁上傳（不需要 Python）**

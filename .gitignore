@@ -9,5 +9,6 @@ build/password.txt
 !build/補充售價.csv
 !build/通路類別調整.csv
 *.json
+!docs/api/index.json
 __pycache__/
 .DS_Store

@@ -2,6 +2,8 @@
 Sell-out 網頁報表：資料建置
 讀 sell-out 明細＋NS 維度表（資料包或 NS 匯出 CSV），照 Power Query 01–05 的邏輯拆組，
 彙總後以密碼加密（PBKDF2-SHA256 → AES-256-GCM）輸出 docs/data.enc。網頁開啟時輸入同一個密碼解密。
+另輸出中繼表（未拆組明細＋維度表）：明文 CSV 到 SellOut報表/09_中繼表（不進版控），
+加密檔到 docs/api（用 docs/api/sellout_api.py 以同一個密碼取數）。
 
 用法：
     python build/build_data.py                 # 密碼讀 build/password.txt（不進版控）或環境變數 SELLOUT_PASSWORD
@@ -14,6 +16,7 @@ import argparse
 import base64
 import csv
 import gzip
+import io
 import json
 import os
 import re
@@ -239,6 +242,94 @@ def check(fx, items, ch_name):
     return {k: (v[0], v[1], v[2], v[1] / v[2] if v[2] else None) for k, v in agg.items()}
 
 
+# ---------------------------------------------------------------- 中繼表
+# 由 data.enc 的同一份內容（data）產生，維度套用規則同網頁端 data.js buildModel：
+# 系列名稱統一、補充售價（NS 售價空白或 0 才套用）、NS／補充 BOM 都沒有的組包系列與前三碼、前六碼歸「其他」、通路調整
+OFF = ("t", "true", "yes", "y", "是", "1")
+NUM_COLS = {"售價", "數量", "台幣金額", "用量", "分攤比例"}
+
+
+def intermediate_tables(data):
+    """回傳 {表代號: (標題, 欄位, 列)}。so＝未拆組明細（年月×通路×品號×幣別，附維度）；item／channel／bom＝維度表。"""
+    smap = dict(data["seriesMap"])
+    norm_s = lambda s: s if s is None else smap.get(s, re.sub(r"系列$", "", s))
+    ns_kits = {r[0] for r in data["bom"]["ns"]} | {r[0] for r in data["bom"]["extra"]}
+    extra_price = dict(data["priceExtra"])
+    items = {}
+    for c, name, spec, p3, p6, series, dosage, inv, brand, price, inactive in data["items"]:
+        src = "NS" if price else None
+        if not price and c in extra_price:
+            price, src = extra_price[c], "補充售價"
+        if inv == "組包" and c not in ns_kits:
+            s = "其他"
+            p3, p6 = ("其他" if p3 else p3), ("其他" if p6 else p6)
+        else:
+            s = norm_s(series)
+        items[c] = [c, name, spec, p3, p6, s, series, dosage, inv, brand, price, src, inactive]
+
+    chs = {}
+    for ch, name, cat, region, note in data["channels"]:
+        chs[ch] = [ch, name, cat, region, note, None]
+    for ch, name, cat, region, desc in data["chAdjust"]:   # 同一通路別多列時逐欄合併、後面的列優先（同網頁）
+        r = chs.setdefault(ch, [ch, None, None, None, None, "新增通路"])
+        r[1] = name or r[1] or (ch if r[5] == "新增通路" else None)
+        r[2], r[3] = cat or r[2], region or r[3]
+        r[5] = "；".join(x for x in (r[5], desc) if x) or None
+
+    so = []
+    for ym, ch, it, cur, q, a in data["so"]:
+        c = chs.get(ch) or [ch, f"{ch}（未對到通路）", None, None]
+        i = items.get(it)
+        if i:
+            so.append([ym, ch, c[1], c[2], c[3], it, i[1], *i[2:6], i[7], i[8], i[9], i[10], cur or None, q, a, "Y"])
+        else:   # 項目主檔沒有的品號：品名用銷售明細的
+            so.append([ym, ch, c[1], c[2], c[3], it, data["soNames"].get(it), None, None, None, None, None, None, None, None,
+                       cur or None, q, a, "N"])
+
+    # BOM：照網頁的優先順序只留實際使用的列（NS → 補充 → 組合單推 → 代碼拆解暫用，前面已有的組包不再用後面的）
+    bom, used = [], set()
+    for key, label, mode in (("ns", "NS BOM", "預設"), ("extra", "補充BOM", "預設"),
+                             ("bu", "組合單推BOM", "含暫用BOM"), ("fb", "代碼拆解暫用", "含暫用BOM")):
+        rows = [r for r in data["bom"][key] if r[0] not in used]
+        used |= {r[0] for r in rows}
+        bom += [[*r, label, mode] for r in rows]
+
+    return {
+        "so": ("未拆組明細", ["年月", "通路別", "通路名稱", "通路類別", "地區", "品號", "品名", "產品代碼", "前三碼", "前六碼", "系列",
+                          "劑型", "存貨型態", "品牌", "售價", "幣別", "數量", "台幣金額", "對到品號"], so),
+        "item": ("品項主檔", ["品號", "品名", "產品代碼", "前三碼", "前六碼", "系列", "NS系列", "劑型", "存貨型態", "品牌",
+                           "售價", "售價來源", "非作用中"], sorted(items.values())),
+        "channel": ("通路對照", ["通路別", "通路名稱", "通路類別", "地區", "備註", "調整說明"], sorted(chs.values(), key=lambda r: r[0] or "")),
+        "bom": ("拆組表", ["組包品號", "成分品號", "用量", "分攤比例", "來源", "使用模式"], bom),
+    }
+
+
+def write_intermediate(data, tables, csv_dir, api_dir, password):
+    """中繼表：本機明文 CSV（csv_dir，不進版控）＋加密 API 檔（api_dir/<代號>.enc，格式同 data.enc、內容是 gzip CSV）
+    與 index.json（表清單，不含資料）。取數用 docs/api/sellout_api.py。"""
+    def to_csv(cols, rows):
+        buf = io.StringIO()
+        w = csv.writer(buf, lineterminator="\n")
+        w.writerow(cols)
+        w.writerows(rows)
+        return buf.getvalue()
+
+    csv_dir, api_dir = Path(csv_dir), Path(api_dir)
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    api_dir.mkdir(parents=True, exist_ok=True)
+    index = {"v": 1, "generated": data["generated"], "source": data["source"], "format": "gzip CSV（UTF-8）→ AES-256-GCM，同 data.enc",
+             "tables": []}
+    for key, (title, cols, rows) in tables.items():
+        text = to_csv(cols, rows)
+        (csv_dir / f"{title}.csv").write_text(text, encoding="utf-8-sig")   # 含 BOM，Excel 直接開不會亂碼
+        (api_dir / f"{key}.enc").write_text(json.dumps(encrypt(gzip.compress(text.encode("utf-8"), 9), password)), encoding="utf-8")
+        index["tables"].append({"name": key, "title": title, "file": f"{key}.enc", "rows": len(rows), "columns": cols,
+                                "numeric": [c for c in cols if c in NUM_COLS]})
+        print(f"中繼表 {title}（{key}）：{len(rows):,} 列")
+    (api_dir / "index.json").write_text(json.dumps(index, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"中繼表 CSV：{csv_dir}；API 檔：{api_dir}")
+
+
 def encrypt(payload: bytes, password: str):
     salt, iv = os.urandom(16), os.urandom(12)
     key = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=PBKDF2_ITER).derive(password.encode())
@@ -295,6 +386,9 @@ def main():
     ap.add_argument("--history", default=str(ROOT / "03_原始資料_業務提供" / "歷史資料"),
                     help="歷史年度明細資料夾；主明細檔已有的年度不讀")
     ap.add_argument("--check", action="store_true", help="只驗算，不輸出")
+    ap.add_argument("--inter-dir", default=str(ROOT / "09_中繼表"), help="中繼表明文 CSV 輸出資料夾（不進版控）")
+    ap.add_argument("--api-dir", default=str(WEB / "docs" / "api"), help="中繼表加密 API 檔輸出資料夾")
+    ap.add_argument("--no-inter", action="store_true", help="不輸出中繼表")
     args = ap.parse_args()
     if not args.sellout:
         args.sellout = str(latest_sellout())
@@ -409,6 +503,8 @@ def main():
     enc = encrypt(gzip.compress(raw, 9), pw)
     Path(args.out).write_text(json.dumps(enc), encoding="utf-8")
     print(f"已輸出 {args.out}（JSON {len(raw)/1e6:.2f} MB → 加密 {Path(args.out).stat().st_size/1e6:.2f} MB）")
+    if not args.no_inter:
+        write_intermediate(data, intermediate_tables(data), args.inter_dir, args.api_dir, pw)
 
 
 if __name__ == "__main__":
