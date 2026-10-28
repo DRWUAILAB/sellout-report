@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sell-out API 說明</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui.css"
+      integrity="sha384-wxLW6kwyHktdDGr6Pv1zgm/VGJh99lfUbzSn6HNHBENZlCN7W602k9VkGdxuFvPn" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+  body { margin: 0; background: #fff; font-family: system-ui, -apple-system, "Microsoft JhengHei", "PingFang TC", sans-serif; }
+  .top { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e5e5; }
+  .top a { color: #1f6feb; text-decoration: none; font-size: 14px; }
+  .top span { font-weight: 600; }
+  .swagger-ui .topbar { display: none; }
+</style>
+</head>
+<body>
+<div class="top">
+  <span>Sell-out 中繼表 API</span>
+  <span><a href="openapi.yaml">openapi.yaml</a> · <a href="sellout_api.py">sellout_api.py</a> · <a href="../">返回報表</a></span>
+</div>
+<div id="swagger"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.17.14/swagger-ui-bundle.js"
+        integrity="sha384-wmyclcVGX/WhUkdkATwhaK1X1JtiNrr2EoYJ+diV3vj4v6OC5yCeSu+yW13SYJep" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  // 同網址部署時「Try it out」直接打本站；本機預覽（file://、localhost）時改打本機檔案
+  const local = !/github\.io$/.test(location.hostname);
+  SwaggerUIBundle({
+    url: "openapi.yaml",
+    dom_id: "#swagger",
+    deepLinking: true,
+    defaultModelsExpandDepth: 1,
+    docExpansion: "list",
+    requestInterceptor: req => {
+      if (local) req.url = req.url.replace("https://drwuailab.github.io/sellout-report/api/", new URL(".", location.href).href);
+      return req;
+    },
+  });
+</script>
+</body>
+</html>

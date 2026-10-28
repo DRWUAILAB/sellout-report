@@ -1,0 +1,187 @@
+openapi: 3.0.3
+info:
+  title: Sell-out 中繼表 API
+  version: "1.0"
+  description: |
+    Sell-out 網頁報表的中繼表（月資料，2019 年起），由 `build/build_data.py` 建置、隨 `更新報表資料.bat` 發布到 GitHub Pages。
+    口徑與網頁報表相同；**未拆組**，拆組後明細請用網頁「資料更新」下載。
+
+    ## 存取方式
+    - 靜態檔案，只有 `GET`，沒有篩選參數：一次取回整張表，下載後自行篩選。
+    - 不需要 HTTP 認證（沒有 API token）；資料本身加密，**解密密碼＝網頁報表密碼**（請向報表維護人員索取）。
+    - `index.json`（表清單）不含資料、不用密碼。
+
+    ## 最快的用法：Python 取數程式
+    ```bash
+    curl -O https://drwuailab.github.io/sellout-report/api/sellout_api.py
+    pip install cryptography pandas
+    python sellout_api.py --list
+    python sellout_api.py so -o 未拆組明細.csv      # 密碼：環境變數 SELLOUT_PASSWORD，沒有就詢問
+    ```
+    ```python
+    from sellout_api import fetch, fetch_df
+    rows = fetch("so")       # list[dict]，數值欄已轉 float
+    df = fetch_df("item")    # pandas DataFrame，品號等代碼欄保持文字
+    ```
+
+    ## 自行解密（其他語言）
+    `GET /{table}.enc` 回傳 `EncryptedPayload`（JSON），解密步驟：
+    1. `key` = PBKDF2-HMAC-SHA256(密碼 UTF-8, `base64decode(salt)`, `iter` 次, 長度 32 bytes)
+    2. `plain` = AES-256-GCM 解密(`key`, nonce=`base64decode(iv)`, `base64decode(ct)`)；`ct` 結尾 16 bytes 是驗證標籤，無附加資料（AAD）。密碼錯誤時驗證失敗
+    3. `csv` = gunzip(`plain`) → UTF-8 CSV，第一列為欄名；空白＝無值
+
+    瀏覽器（Web Crypto）範例：
+    ```js
+    const enc = await (await fetch("https://drwuailab.github.io/sellout-report/api/so.enc")).json();
+    const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(enc.salt), iterations: enc.iter },
+      base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const gz = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(enc.iv) }, key, b64(enc.ct));
+    const csv = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream("gzip"))).text();
+    ```
+servers:
+  - url: https://drwuailab.github.io/sellout-report/api
+    description: GitHub Pages
+tags:
+  - name: 中繼表
+paths:
+  /index.json:
+    get:
+      tags: [中繼表]
+      summary: 表清單（不含資料）
+      description: 各中繼表的代號、名稱、列數、欄位與數值欄，以及建置時間和資料來源。可用來檢查資料是否已更新。
+      operationId: listTables
+      responses:
+        "200":
+          description: 表清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TableIndex"
+  /{table}.enc:
+    get:
+      tags: [中繼表]
+      summary: 取得一張中繼表（加密）
+      description: |
+        回傳加密的整張表，解密後為 CSV，欄位見下方 Schemas：
+        `so` → SoRow、`item` → ItemRow、`channel` → ChannelRow、`bom` → BomRow。
+        回應的 Content-Type 由 GitHub Pages 決定（通常是 `application/octet-stream`），內容一律是 JSON。
+      operationId: getTable
+      parameters:
+        - name: table
+          in: path
+          required: true
+          description: |
+            表代號
+            - `so` 未拆組明細（年月×通路別×品號×幣別）
+            - `item` 品項主檔
+            - `channel` 通路對照
+            - `bom` 拆組表
+          schema:
+            type: string
+            enum: [so, item, channel, bom]
+      responses:
+        "200":
+          description: 加密資料
+          content:
+            application/octet-stream:
+              schema:
+                $ref: "#/components/schemas/EncryptedPayload"
+        "404":
+          description: 沒有這張表（代號錯誤，或中繼表尚未發布）
+components:
+  schemas:
+    TableIndex:
+      type: object
+      properties:
+        v: { type: integer, example: 1 }
+        generated: { type: string, description: 建置時間（台北時間）, example: "2026-10-28 13:24" }
+        source:
+          type: object
+          properties:
+            sellout: { type: string, description: 銷售明細來源檔 }
+            datapack: { type: string, description: 資料包檔名 }
+            item: { type: string, description: 項目主檔來源 }
+        format: { type: string, example: gzip CSV（UTF-8）→ AES-256-GCM，同 data.enc }
+        tables:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string, example: so }
+              title: { type: string, example: 未拆組明細 }
+              file: { type: string, example: so.enc }
+              rows: { type: integer, example: 100226 }
+              columns: { type: array, items: { type: string } }
+              numeric: { type: array, items: { type: string }, description: 數值欄（其餘皆為文字） }
+    EncryptedPayload:
+      type: object
+      required: [v, kdf, iter, salt, iv, ct]
+      properties:
+        v: { type: integer, example: 1 }
+        kdf: { type: string, example: PBKDF2-SHA256 }
+        iter: { type: integer, description: PBKDF2 次數, example: 250000 }
+        salt: { type: string, format: byte, description: 16 bytes，Base64 }
+        iv: { type: string, format: byte, description: AES-GCM nonce 12 bytes，Base64 }
+        ct: { type: string, format: byte, description: 密文＋16 bytes 驗證標籤，Base64；解密後為 gzip 壓縮的 UTF-8 CSV }
+    SoRow:
+      type: object
+      description: 未拆組明細（so）的一列；依 年月、通路別、品號、幣別 彙總
+      properties:
+        年月: { type: string, example: "202609", description: yyyymm；只有月資料 }
+        通路別: { type: string, example: 馬來西亞, description: 業務明細的通路別（原始代號） }
+        通路名稱: { type: string, description: 套用通路調整後的報表通路名稱；不在通路對照時為「xxx（未對到通路）」 }
+        通路類別: { type: string, example: 海外通路 }
+        地區: { type: string, example: 海外 }
+        品號: { type: string, example: "124041150001", description: 文字，保留前導 0 }
+        品名: { type: string, description: 項目主檔品名；主檔沒有時用銷售明細的品名 }
+        產品代碼: { type: string, example: WWS015A(2502) }
+        前三碼: { type: string, example: WWS }
+        前六碼: { type: string, example: WWS015 }
+        系列: { type: string, example: 超微C美白, description: 已統一的報表系列名稱 }
+        劑型: { type: string }
+        存貨型態: { type: string, example: 正貨 }
+        品牌: { type: string, example: DR.WU }
+        售價: { type: number, nullable: true, description: 含稅售價（NS Base Price × 1.05，已套用補充售價） }
+        幣別: { type: string, nullable: true, example: MYR, description: 歷史資料（2019–2025）為空白 }
+        數量: { type: number }
+        台幣金額: { type: number }
+        對到品號: { type: string, enum: ["Y", "N"], description: N＝項目主檔沒有此品號 }
+    ItemRow:
+      type: object
+      description: 品項主檔（item）
+      properties:
+        品號: { type: string }
+        品名: { type: string }
+        產品代碼: { type: string }
+        前三碼: { type: string, description: NS／補充 BOM 都沒有的組包為「其他」；PB／PA／PT 促銷組為「組合包」 }
+        前六碼: { type: string }
+        系列: { type: string, description: 報表系列名稱（已統一） }
+        NS系列: { type: string, description: NS 原始系列名稱 }
+        劑型: { type: string }
+        存貨型態: { type: string, example: 組包 }
+        品牌: { type: string, example: Redermx }
+        售價: { type: number, nullable: true }
+        售價來源: { type: string, nullable: true, enum: [NS, 補充售價] }
+        非作用中: { type: string, enum: [T, F] }
+    ChannelRow:
+      type: object
+      description: 通路對照（channel），已套用通路類別調整
+      properties:
+        通路別: { type: string }
+        通路名稱: { type: string }
+        通路類別: { type: string, example: 線上自營 }
+        地區: { type: string, example: 國內 }
+        備註: { type: string, nullable: true }
+        調整說明: { type: string, nullable: true, description: 「新增通路」或調整原因 }
+    BomRow:
+      type: object
+      description: 拆組表（bom），只含實際使用的列
+      properties:
+        組包品號: { type: string }
+        成分品號: { type: string }
+        用量: { type: number, description: 每個組包含的成分數量 }
+        分攤比例: { type: number, description: 組包金額分攤到此成分的比例 }
+        來源: { type: string, enum: [NS BOM, 補充BOM, 組合單推BOM, 代碼拆解暫用] }
+        使用模式: { type: string, enum: [預設, 含暫用BOM], description: 預設＝網頁報表預設（只用 NS BOM）也會使用 }

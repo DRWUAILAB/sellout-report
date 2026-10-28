@@ -73,6 +73,8 @@ NS 沒有售價、但業務計算市價時有計價的品項，寫在 `build/補
 - **本機 CSV**：`SellOut報表/09_中繼表/*.csv`（明文，含 BOM，Excel 可直接開；不進版控）
 - **API**：`docs/api/<代號>.enc`（加密，格式同 data.enc、內容是 gzip CSV，密碼同網頁報表）與 `docs/api/index.json`（表清單，不含資料），隨 `更新報表資料.bat` 一起發布到 GitHub Pages：`https://drwuailab.github.io/sellout-report/api/`
 
+API 說明頁（Swagger UI，`docs/api/index.html`＋`docs/api/openapi.yaml`）：`https://drwuailab.github.io/sellout-report/api/`，含各表欄位、加密格式與其他語言的解密步驟。API 沒有另外的 token：不需要 HTTP 認證，解密密碼即網頁報表密碼。
+
 取數用 `docs/api/sellout_api.py`（需要 `cryptography`；`fetch_df` 另需 `pandas`），網站上也可直接下載：
 
 ```bash
