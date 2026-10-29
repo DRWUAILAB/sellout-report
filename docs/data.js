@@ -312,14 +312,119 @@ window.SO = (() => {
 
   // ------------------------------------------------------------ 加密（與 build_data.py 相同格式）
   const b64e = buf => { let s = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
-  async function encrypt(obj, password, iter = 250000) {
-    const gz = await new Response(new Blob([JSON.stringify(obj)]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+  const encrypt = (obj, password, iter) => encryptText(JSON.stringify(obj), password, iter);
+  async function encryptText(text, password, iter = 250000) {
+    const gz = await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
     const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
     const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
     const key = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter },
       base, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
     const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, gz);
     return { v: 1, kdf: "PBKDF2-SHA256", iter, salt: b64e(salt), iv: b64e(iv), ct: b64e(ct) };
+  }
+
+  // ------------------------------------------------------------ 中繼表（同 build_data.py intermediate_tables／write_intermediate）
+  // 網頁發布時與 data.enc 一起產生 docs/api 的加密檔，API 取數的內容才會和網站一致
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);   // 依字碼排序（同 Python sorted）
+  const cmpRow = (a, b) => { for (let i = 0; i < Math.min(a.length, b.length); i++) { const c = cmp(a[i] ?? "", b[i] ?? ""); if (c) return c; } return a.length - b.length; };
+  function intermediateTables(raw) {
+    const smap = new Map(raw.seriesMap || []);
+    const normS = s => (s == null ? s : smap.has(s) ? smap.get(s) : s.replace(/系列$/, ""));
+    const nsKits = new Set([...raw.bom.ns, ...(raw.bom.extra || [])].map(r => r[0]));
+    const extraPrice = new Map(raw.priceExtra || []);
+    const items = new Map();
+    for (let [c, name, spec, p3, p6, series, dosage, inv, brand, price, inactive] of raw.items) {
+      let src = price ? "NS" : null, s;
+      if (!price && extraPrice.has(c)) { price = extraPrice.get(c); src = "補充售價"; }
+      if (inv === "組包" && !nsKits.has(c)) { s = "其他"; p3 = p3 ? "其他" : p3; p6 = p6 ? "其他" : p6; }
+      else s = normS(series);
+      items.set(c, [c, name, spec, p3, p6, s, series, dosage, inv, brand, price, src, inactive]);
+    }
+    const chs = new Map();
+    for (const [ch, name, cat, region, note] of raw.channels) chs.set(ch, [ch, name, cat, region, note, null]);
+    for (const [ch, name, cat, region, desc] of raw.chAdjust || []) {   // 同一通路別多列時逐欄合併、後面的列優先
+      if (!chs.has(ch)) chs.set(ch, [ch, null, null, null, null, "新增通路"]);
+      const r = chs.get(ch);
+      r[1] = name || r[1] || (r[5] === "新增通路" ? ch : null);
+      r[2] = cat || r[2]; r[3] = region || r[3];
+      r[5] = [r[5], desc].filter(Boolean).join("；") || null;
+    }
+    const r4 = v => Math.round(v * 1e4) / 1e4;
+    const so = [...raw.so].sort(cmpRow).map(([ym, ch, it, cur, q, a]) => {
+      const c = chs.get(ch) || [ch, `${ch}（未對到通路）`, null, null], i = items.get(it);
+      return i ? [ym, ch, c[1], c[2], c[3], it, i[1], ...i.slice(2, 6), i[7], i[8], i[9], i[10], cur || null, r4(q), r4(a), "Y"]
+        : [ym, ch, c[1], c[2], c[3], it, (raw.soNames || {})[it] ?? null, null, null, null, null, null, null, null, null, cur || null, r4(q), r4(a), "N"];
+    });
+    // BOM：照網頁的優先順序只留實際使用的列（NS → 補充 → 組合單推 → 代碼拆解暫用，前面已有的組包不再用後面的）
+    const bom = [], used = new Set();
+    for (const [key, label, mode] of [["ns", "NS BOM", "預設"], ["extra", "補充BOM", "預設"], ["bu", "組合單推BOM", "含暫用BOM"], ["fb", "代碼拆解暫用", "含暫用BOM"]]) {
+      const rows = (raw.bom[key] || []).filter(r => !used.has(r[0]));
+      for (const r of rows) used.add(r[0]);
+      bom.push(...rows.map(r => [...r, label, mode]));
+    }
+    return {
+      so: ["未拆組明細", ["年月", "通路別", "通路名稱", "通路類別", "地區", "品號", "品名", "產品代碼", "前三碼", "前六碼", "系列",
+        "劑型", "存貨型態", "品牌", "售價", "幣別", "數量", "台幣金額", "對到品號"], so],
+      item: ["品項主檔", ["品號", "品名", "產品代碼", "前三碼", "前六碼", "系列", "NS系列", "劑型", "存貨型態", "品牌",
+        "售價", "售價來源", "非作用中"], [...items.values()].sort(cmpRow)],
+      channel: ["通路對照", ["通路別", "通路名稱", "通路類別", "地區", "備註", "調整說明"], [...chs.values()].sort((a, b) => cmp(a[0] || "", b[0] || ""))],
+      bom: ["拆組表", ["組包品號", "成分品號", "用量", "分攤比例", "來源", "使用模式"], bom],
+    };
+  }
+  const NUM_COLS = new Set(["售價", "數量", "台幣金額", "用量", "分攤比例"]);
+  const csvText = (cols, rows) => [cols, ...rows].map(r => r.map(v => {
+    const s = v == null ? "" : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n") + "\n";
+
+  // 發布用的檔案：{ 路徑: 內容（文字）}，data.enc 與 docs/api 中繼表（格式同 build_data.py）
+  async function publishFiles(raw, password) {
+    const files = { "docs/data.enc": JSON.stringify(await encrypt(raw, password)) };
+    const index = { v: 1, generated: raw.generated, source: raw.source, format: "gzip CSV（UTF-8）→ AES-256-GCM，同 data.enc", tables: [] };
+    for (const [key, [title, cols, rows]] of Object.entries(intermediateTables(raw))) {
+      files[`docs/api/${key}.enc`] = JSON.stringify(await encryptText(csvText(cols, rows), password));
+      index.tables.push({ name: key, title, file: `${key}.enc`, rows: rows.length, columns: cols, numeric: cols.filter(c => NUM_COLS.has(c)) });
+    }
+    files["docs/api/index.json"] = JSON.stringify(index, null, 1);
+    return files;
+  }
+
+  // ------------------------------------------------------------ 發布到 GitHub（Git Data API，所有檔案一個 commit）
+  // key＝{ token, repo: "owner/name", branch }，由 docs/publish_key.enc 以「更新密碼」解出（build/set_publish_key.py 產生）
+  async function publishToGitHub(key, files, message, onStep = () => {}) {
+    const api = async (path, opt = {}) => {
+      const res = await fetch(`https://api.github.com/repos/${key.repo}/${path}`, {
+        ...opt, headers: { Authorization: `Bearer ${key.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+          ...(opt.body ? { "Content-Type": "application/json" } : {}) } });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(res.status === 401 ? "GitHub 金鑰無效或已過期，請找維護的人重新設定（build/set_publish_key.py）"
+          : res.status === 403 || res.status === 404 ? "GitHub 金鑰沒有這個 repo 的寫入權限，請找維護的人重新設定"
+          : `GitHub 回應 ${res.status}：${body.message || res.statusText}`);
+        err.status = res.status;
+        throw err;
+      }
+      return body;
+    };
+    onStep("上傳檔案到 GitHub…");
+    const blobs = await Promise.all(Object.entries(files).map(async ([path, text]) => {
+      const { sha } = await api("git/blobs", { method: "POST", body: JSON.stringify({ content: text, encoding: "utf-8" }) });
+      return { path, mode: "100644", type: "blob", sha };
+    }));
+    for (let attempt = 0; ; attempt++) {   // 有人同時發布（不是快轉）時以最新版本重做一次
+      onStep("建立 commit…");
+      const ref = await api(`git/ref/heads/${key.branch}`);
+      const head = await api(`git/commits/${ref.object.sha}`);
+      const tree = await api("git/trees", { method: "POST", body: JSON.stringify({ base_tree: head.tree.sha, tree: blobs }) });
+      if (tree.sha === head.tree.sha) return { unchanged: true };
+      const commit = await api("git/commits", { method: "POST", body: JSON.stringify({ message, tree: tree.sha, parents: [head.sha] }) });
+      try {
+        await api(`git/refs/heads/${key.branch}`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha, force: false }) });
+        return { sha: commit.sha, url: `https://github.com/${key.repo}/commit/${commit.sha}` };
+      } catch (e) {
+        if (e.status !== 422 || attempt) throw e;
+      }
+    }
   }
 
   // ------------------------------------------------------------ Excel
@@ -421,5 +526,6 @@ window.SO = (() => {
     XLSX.writeFile(wb, filename);
   }
 
-  return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt, downloadXlsx };
+  return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
+    intermediateTables, publishFiles, publishToGitHub, downloadXlsx };
 })();

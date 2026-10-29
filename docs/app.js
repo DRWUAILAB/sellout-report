@@ -1022,7 +1022,7 @@
         PENDING._local = true;
         load(PENDING);
         PENDING = null;
-        box.innerHTML = `<p class="ok">✓ 已套用。報表已改用上傳的資料（只在這個分頁）。要讓所有人看到，請在下方「發布」下載 data.enc 上傳到 GitHub。</p>`;
+        box.innerHTML = `<p class="ok">✓ 已套用。報表已改用上傳的資料（只在這個分頁）。要讓所有人看到，請在下方「② 發布給所有人」輸入更新密碼發布。</p>`;
       };
       $("#updCancel").onclick = () => { PENDING = null; box.hidden = true; $("#updFile").value = ""; };
     } catch (err) {
@@ -1037,6 +1037,37 @@
     a.download = name;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // 直接發布：更新密碼解開 docs/publish_key.enc（GitHub 金鑰，build/set_publish_key.py 產生），
+  // 以目前的查看密碼加密 data.enc 與中繼表，一個 commit 推到 GitHub。金鑰只留在這次呼叫的記憶體裡
+  async function publish() {
+    const msg = $("#updPubMsg"), btn = $("#updPub"), pwIn = $("#updPubPw");
+    const say = (html, cls = "") => { msg.className = "small " + cls; msg.innerHTML = html; };
+    if (!RAW._local) return say("目前顯示的就是線上資料。請先在「① 上傳新資料」上傳並按「套用到報表」。", "err");
+    if (!pwIn.value) return say("請輸入更新密碼。", "err");
+    btn.disabled = true;
+    try {
+      say("驗證更新密碼…");
+      const res = await fetch("publish_key.enc", { cache: "no-store" });
+      if (!res.ok) throw new Error("網站還沒有設定發布金鑰（docs/publish_key.enc），請找維護的人執行 build/set_publish_key.py");
+      let key;
+      try { key = await decrypt(await res.json(), pwIn.value); } catch { throw new Error("更新密碼錯誤"); }
+      const { _local, ...clean } = RAW;
+      if (!confirm(`確定要發布？\n\nsell-out 明細：${clean.source.sellout}\n期間：${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}\n\n發布後所有人都會看到這份資料。`)) return say("");
+      say("加密報表資料與中繼表…");
+      const files = await SO.publishFiles(clean, PASSWORD);
+      const r = await SO.publishToGitHub(key, files, `網頁更新 sell-out 資料（${clean.source.sellout}）`, t => say(esc(t)));
+      ENC = JSON.parse(files["docs/data.enc"]);   // 之後「還原為線上資料」就是這一版
+      RAW._local = false;
+      pwIn.value = "";
+      renderUpdInfo();
+      say(r.unchanged ? "✓ 內容和線上版本相同，不需要發布。"
+        : `✓ 已發布（<a href="${esc(r.url)}" target="_blank" rel="noopener">commit ${esc(r.sha.slice(0, 7))}</a>），約 1–2 分鐘後所有人重新整理就會看到。`, "ok");
+    } catch (err) {
+      console.error(err);
+      say(`發布失敗：${esc(err.message)}（報表沒有變更，可以修正後再發布一次）`, "err");
+    } finally { btn.disabled = false; }
   }
 
   function bindUpd() {
@@ -1059,6 +1090,7 @@
         download("data.enc", new Blob([JSON.stringify(enc)], { type: "application/octet-stream" }));
       } finally { btn.disabled = false; btn.textContent = t; }
     });
+    $("#updPubForm").addEventListener("submit", e => { e.preventDefault(); publish(); });
     $("#updSeries").addEventListener("click", () => {
       const rows = [["原系列名稱", "報表系列名稱"], ...(RAW.seriesMap || [])];
       download("系列對照.csv", new Blob(["\uFEFF" + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));

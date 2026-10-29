@@ -9,7 +9,7 @@ Sell-out BI 兩張報表的網頁版，部署在 GitHub Pages。資料以密碼�
 | ③ 系列別樞紐（月） | 仿 Excel 樞紐分析表：系列別名稱 → 規格前三碼 → 規格前六碼，可像群組一樣點開／收合，每組第一列 Total 小計、依總計排序；欄＝銷貨年月＋總計。切換：拆組／未拆組、銷貨金額／數量；篩選：年度、品牌、通路、通路類別；可匯出 Excel |
 | ④ 通路別 | 仿 Sell in 405 版面：通路類別 → 通路 → 系列 → 品號（可展開）；欄＝前期、本期（數量、金額、占比、折扣率）、本年累計、變化（金額差異、成長率、折扣率增減）；可切拆組／未拆組 |
 | 資料檢核 | 拆組前後金額差、組包未拆、未對到品號、幣別與其他月份不一致、沒有品項明細的通路、通路調整 |
-| 資料更新 | 上傳新的 sell-out 明細（.xlsx）、通路對照、通路調整、NS 維度表 CSV，瀏覽器內重算並預覽各月差異；下載加密的 data.enc 發布給所有人 |
+| 資料更新 | 上傳新的 sell-out 明細（.xlsx）、通路對照、通路調整、NS 維度表 CSV，瀏覽器內重算並預覽各月差異；輸入更新密碼直接發布給所有人（data.enc＋中繼表） |
 
 每個頁籤都可以按右上「⬇ 下載 Excel」，依目前的篩選條件下載（附「篩選條件」工作表）；「⬇ 全部報表」把 ①～④（依各頁目前的篩選條件）和資料檢核放在同一個 Excel。資料更新頁另可下載完整拆組明細（有篩選鈕）。
 
@@ -89,7 +89,7 @@ rows = fetch("so")             # list[dict]，數值欄已轉 float
 df = fetch_df("item")          # pandas DataFrame，品號等代碼欄保持文字
 ```
 
-注意：網頁「資料更新」上傳發布的只有 data.enc，中繼表不會跟著更新；要更新中繼表請用本機程式（方法二）。換密碼後中繼表也改用新密碼。
+網頁「資料更新」發布時，中繼表由瀏覽器以同一套規則重新產生（`data.js` 的 `intermediateTables`，與 build_data.py 逐格相同）並一起發布；只有「手動發布」（下載 data.enc 自己上傳）不會更新中繼表。換密碼後中繼表也改用新密碼。
 
 ## 每月更新
 
@@ -97,7 +97,14 @@ df = fetch_df("item")          # pandas DataFrame，品號等代碼欄保持文�
 
 1. 登入報表 →「資料更新」→ 拖入新的 sell-out 明細 .xlsx（有新通路時，先下載通路對照表加一列，一起上傳）
 2. 檢查預覽的各月差異與警告，按「套用到報表」
-3. 按「下載加密資料檔 data.enc」，到 GitHub 的 `docs` 資料夾上傳覆蓋、Commit，約 1 分鐘後所有人看到新資料
+3. 在「② 發布給所有人」輸入**更新密碼**，按「發布到網站」：data.enc 與中繼表一個 commit 推到 GitHub，約 1–2 分鐘後所有人看到新資料
+
+**更新密碼與發布金鑰**：更新密碼和查看密碼分開，只給負責更新的人。網站上的 `docs/publish_key.enc` 是用更新密碼加密（PBKDF2-SHA256 60 萬次 → AES-256-GCM）的 GitHub 金鑰；網頁輸入更新密碼解開後直接呼叫 GitHub API commit，金鑰只留在那次操作的記憶體裡。第一次設定、金鑰到期、換更新密碼時：
+
+1. GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token：Resource owner＝DRWUAILAB，Only select repositories＝sellout-report，Repository permissions → Contents＝Read and write（其他都不用）
+2. `python build/set_publish_key.py --publish`，貼上金鑰、設定更新密碼（至少 12 字元，不能和查看密碼相同）
+
+repo 是公開的，金鑰檔任何人都下載得到，安全性靠更新密碼的長度；舊的 publish_key.enc 會留在 git 歷史裡，換密碼或懷疑外流時一定要在 GitHub 上 Revoke 舊金鑰。金鑰權限只限這個 repo 的內容。
 
 **方法二：本機程式**（用電腦上的原始資料整份重建，會取代網頁上傳發布的版本；報表內容沒有變化時不會發布，`build/` 的對照表 CSV 有修改會一起推上 GitHub）
 

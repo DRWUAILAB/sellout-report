@@ -176,12 +176,20 @@
     </div>
     <section class="card">
       <div class="card-head"><h2>② 發布給所有人</h2></div>
-      <p class="small">上傳的資料只在你這個分頁有效（重新整理就會消失）。確認數字沒問題後：</p>
-      <ol class="small hint">
-        <li>按 <button type="button" id="updEnc" class="sm">⬇ 下載加密資料檔 data.enc</button>（用目前的密碼加密）</li>
-        <li>開啟 <a href="https://github.com/DRWUAILAB/sellout-report/upload/main/docs" target="_blank" rel="noopener">GitHub 上傳頁（docs 資料夾）</a>，把 data.enc 拖進去，按「Commit changes」</li>
-        <li>約 1 分鐘後網站更新，所有人重新整理就會看到新資料</li>
-      </ol>
+      <p class="small">上傳的資料只在你這個分頁有效（重新整理就會消失）。確認數字沒問題、按過「套用到報表」後，輸入<b>更新密碼</b>（和查看報表的密碼不同，只給負責更新的人）直接發布：</p>
+      <form class="btns-row" id="updPubForm" autocomplete="off">
+        <input type="password" id="updPubPw" placeholder="更新密碼" autocomplete="new-password" aria-label="更新密碼">
+        <button type="submit" id="updPub">⬆ 發布到網站</button>
+      </form>
+      <div id="updPubMsg" class="small"></div>
+      <p class="small muted">發布會把報表資料 data.enc 與 API 中繼表一起更新到 GitHub（一個 commit），約 1–2 分鐘後所有人重新整理就會看到。</p>
+      <details class="small">
+        <summary>備用：手動發布</summary>
+        <ol class="hint">
+          <li>按 <button type="button" id="updEnc" class="sm">⬇ 下載加密資料檔 data.enc</button>（用目前的密碼加密）</li>
+          <li>開啟 <a href="https://github.com/DRWUAILAB/sellout-report/upload/main/docs" target="_blank" rel="noopener">GitHub 上傳頁（docs 資料夾）</a>，把 data.enc 拖進去，按「Commit changes」（這個方法不會更新 API 中繼表）</li>
+        </ol>
+      </details>
       <p class="note">也可以在電腦上執行 07_網頁報表\更新報表資料.bat：它會用電腦上的原始資料（03_原始資料_業務提供、NS 匯出、build 資料夾的對照表）整份重建，<b>會取代</b>之前在這裡上傳發布的版本；網頁上傳時用的對照表（通路、通路調整、系列、裸瓶、補充 BOM）如果要保留，請一併放到電腦上的對應檔案。</p>
     </section>
   </main>
