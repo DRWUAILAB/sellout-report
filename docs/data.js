@@ -328,8 +328,7 @@ window.SO = (() => {
   const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);   // 依字碼排序（同 Python sorted）
   const cmpRow = (a, b) => { for (let i = 0; i < Math.min(a.length, b.length); i++) { const c = cmp(a[i] ?? "", b[i] ?? ""); if (c) return c; } return a.length - b.length; };
   function intermediateTables(raw) {
-    const smap = new Map(raw.seriesMap || []);
-    const normS = s => (s == null ? s : smap.has(s) ? smap.get(s) : s.replace(/系列$/, ""));
+    const normS = seriesNormalizer(raw.seriesMap);
     const nsKits = new Set([...raw.bom.ns, ...(raw.bom.extra || [])].map(r => r[0]));
     const extraPrice = new Map(raw.priceExtra || []);
     const items = new Map();
@@ -390,15 +389,28 @@ window.SO = (() => {
   }
 
   // ------------------------------------------------------------ 發布到 GitHub（Git Data API，所有檔案一個 commit）
+  // git 的 blob sha（sha1("blob <位元組數>\0" + 內容)），用來確認線上的 data.enc 還是這個頁面載入的那一版
+  async function gitBlobSha(buf) {
+    const bytes = new Uint8Array(buf), head = new TextEncoder().encode(`blob ${bytes.length}\0`);
+    const all = new Uint8Array(head.length + bytes.length);
+    all.set(head); all.set(bytes, head.length);
+    return [...new Uint8Array(await crypto.subtle.digest("SHA-1", all))].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+
   // key＝{ token, repo: "owner/name", branch }，由 docs/publish_key.enc 以「更新密碼」解出（build/set_publish_key.py 產生）
-  async function publishToGitHub(key, files, message, onStep = () => {}) {
+  // baseSha＝頁面載入的 data.enc 的 blob sha：GitHub 上的 data.enc 已經不是這一版（有人在這之後發布過、或換過查看密碼）就停止，
+  // 不覆蓋別人的版本；只有其他檔案（程式）變動造成的不是快轉才重試
+  async function publishToGitHub(key, files, message, baseSha, onStep = () => {}) {
     const api = async (path, opt = {}) => {
       const res = await fetch(`https://api.github.com/repos/${key.repo}/${path}`, {
         ...opt, headers: { Authorization: `Bearer ${key.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
           ...(opt.body ? { "Content-Type": "application/json" } : {}) } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = new Error(res.status === 401 ? "GitHub 金鑰無效或已過期，請找維護的人重新設定（build/set_publish_key.py）"
+        const limited = res.status === 429 || (res.status === 403 && (res.headers.get("retry-after")
+          || res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(body.message || "")));
+        const err = new Error(limited ? "GitHub 暫時限制請求次數，請等幾分鐘後再發布"
+          : res.status === 401 ? "GitHub 金鑰無效或已過期，請找維護的人重新設定（build/set_publish_key.py）"
           : res.status === 403 || res.status === 404 ? "GitHub 金鑰沒有這個 repo 的寫入權限，請找維護的人重新設定"
           : `GitHub 回應 ${res.status}：${body.message || res.statusText}`);
         err.status = res.status;
@@ -406,23 +418,31 @@ window.SO = (() => {
       }
       return body;
     };
-    onStep("上傳檔案到 GitHub…");
-    const blobs = await Promise.all(Object.entries(files).map(async ([path, text]) => {
+    const blobs = [];
+    for (const [path, text] of Object.entries(files)) {   // 逐一上傳，避免同時大量請求觸發 GitHub 的流量限制
+      onStep(`上傳檔案到 GitHub（${blobs.length + 1}/${Object.keys(files).length}）…`);
       const { sha } = await api("git/blobs", { method: "POST", body: JSON.stringify({ content: text, encoding: "utf-8" }) });
-      return { path, mode: "100644", type: "blob", sha };
-    }));
-    for (let attempt = 0; ; attempt++) {   // 有人同時發布（不是快轉）時以最新版本重做一次
+      blobs.push({ path, mode: "100644", type: "blob", sha });
+    }
+    for (let attempt = 0; ; attempt++) {
       onStep("建立 commit…");
       const ref = await api(`git/ref/heads/${key.branch}`);
       const head = await api(`git/commits/${ref.object.sha}`);
+      const live = (await api(`contents/docs?ref=${head.sha}`)).find(f => f.name === "data.enc");
+      if (live?.sha !== baseSha) {
+        const err = new Error("線上資料在你開啟這個頁面之後已經更新（可能有人剛發布，或換了查看密碼）。為避免覆蓋別人的版本，"
+          + "這次沒有發布：請等 1–2 分鐘後重新整理頁面、重新上傳，確認數字後再發布");
+        err.status = "conflict";
+        throw err;
+      }
       const tree = await api("git/trees", { method: "POST", body: JSON.stringify({ base_tree: head.tree.sha, tree: blobs }) });
-      if (tree.sha === head.tree.sha) return { unchanged: true };
       const commit = await api("git/commits", { method: "POST", body: JSON.stringify({ message, tree: tree.sha, parents: [head.sha] }) });
       try {
         await api(`git/refs/heads/${key.branch}`, { method: "PATCH", body: JSON.stringify({ sha: commit.sha, force: false }) });
-        return { sha: commit.sha, url: `https://github.com/${key.repo}/commit/${commit.sha}` };
+        return { sha: commit.sha, url: `https://github.com/${key.repo}/commit/${commit.sha}`,
+          dataSha: blobs.find(b => b.path === "docs/data.enc").sha };
       } catch (e) {
-        if (e.status !== 422 || attempt) throw e;
+        if (e.status !== 422 || attempt >= 2) throw e;
       }
     }
   }
@@ -527,5 +547,5 @@ window.SO = (() => {
   }
 
   return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
-    intermediateTables, publishFiles, publishToGitHub, downloadXlsx };
+    intermediateTables, publishFiles, publishToGitHub, gitBlobSha, downloadXlsx };
 })();

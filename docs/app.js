@@ -25,11 +25,20 @@
     return JSON.parse(await new Response(stream).text());
   }
 
-  let ENC = null, RAW = null, PASSWORD = null;
+  let ENC = null, ENC_SHA = null, RAW = null, PASSWORD = null;   // ENC_SHA＝線上 data.enc 的 git blob sha（發布時確認沒被別人更新）
   async function open(password) {
-    if (!ENC) ENC = await (await fetch("data.enc", { cache: "no-cache" })).json();
+    if (!ENC) {
+      const buf = await (await fetch("data.enc", { cache: "no-cache" })).arrayBuffer();
+      ENC = JSON.parse(new TextDecoder().decode(buf));
+      ENC_SHA = await SO.gitBlobSha(buf);
+    }
     return decrypt(ENC, password);
   }
+
+  // 比較兩份資料是否相同（不看產生時間；鍵的順序不同也算相同）
+  const canon = v => Array.isArray(v) ? `[${v.map(canon).join(",")}]`
+    : v && typeof v === "object" ? `{${Object.keys(v).sort().map(k => JSON.stringify(k) + ":" + canon(v[k])).join(",")}}` : JSON.stringify(v);
+  const sameData = (a, b) => canon({ ...a, generated: null, _local: null }) === canon({ ...b, generated: null, _local: null });
 
   // ------------------------------------------------------------ 格式
   const nf0 = new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 });
@@ -1051,19 +1060,30 @@
       say("驗證更新密碼…");
       const res = await fetch("publish_key.enc", { cache: "no-store" });
       if (!res.ok) throw new Error("網站還沒有設定發布金鑰（docs/publish_key.enc），請找維護的人執行 build/set_publish_key.py");
-      let key;
-      try { key = await decrypt(await res.json(), pwIn.value); } catch { throw new Error("更新密碼錯誤"); }
+      let enc, key;
+      try { enc = await res.json(); } catch { throw new Error("發布金鑰檔（docs/publish_key.enc）格式錯誤，請找維護的人重新執行 build/set_publish_key.py"); }
+      try { key = await decrypt(enc, pwIn.value); } catch (e) {
+        // 密碼錯誤時 AES-GCM 驗證失敗（OperationError）；其他錯誤多半是檔案損毀或瀏覽器不支援
+        throw new Error(e.name === "OperationError" ? "更新密碼錯誤"
+          : `無法解開發布金鑰（${e.message}）。請改用最新版 Chrome／Edge，或找維護的人重新設定`);
+      }
+      if (!key?.token || !key.repo || !key.branch) throw new Error("發布金鑰內容不完整，請找維護的人重新執行 build/set_publish_key.py");
       const { _local, ...clean } = RAW;
+      if (sameData(clean, await decrypt(ENC, PASSWORD))) {
+        RAW._local = false; renderUpdInfo(); setMeta(); pwIn.value = "";
+        return say("✓ 上傳的資料和線上版本相同，不需要發布。", "ok");
+      }
       if (!confirm(`確定要發布？\n\nsell-out 明細：${clean.source.sellout}\n期間：${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}\n\n發布後所有人都會看到這份資料。`)) return say("");
       say("加密報表資料與中繼表…");
       const files = await SO.publishFiles(clean, PASSWORD);
-      const r = await SO.publishToGitHub(key, files, `網頁更新 sell-out 資料（${clean.source.sellout}）`, t => say(esc(t)));
-      ENC = JSON.parse(files["docs/data.enc"]);   // 之後「還原為線上資料」就是這一版
+      const r = await SO.publishToGitHub(key, files, `網頁更新 sell-out 資料（${clean.source.sellout}）`, ENC_SHA, t => say(esc(t)));
+      ENC = JSON.parse(files["docs/data.enc"]);   // 之後「還原為線上資料」與下一次發布的比對基準就是這一版
+      ENC_SHA = r.dataSha;
       RAW._local = false;
       pwIn.value = "";
       renderUpdInfo();
-      say(r.unchanged ? "✓ 內容和線上版本相同，不需要發布。"
-        : `✓ 已發布（<a href="${esc(r.url)}" target="_blank" rel="noopener">commit ${esc(r.sha.slice(0, 7))}</a>），約 1–2 分鐘後所有人重新整理就會看到。`, "ok");
+      setMeta();
+      say(`✓ 已發布（<a href="${esc(r.url)}" target="_blank" rel="noopener">commit ${esc(r.sha.slice(0, 7))}</a>），約 1–2 分鐘後所有人重新整理就會看到。`, "ok");
     } catch (err) {
       console.error(err);
       say(`發布失敗：${esc(err.message)}（報表沒有變更，可以修正後再發布一次）`, "err");
@@ -1145,12 +1165,16 @@
     });
   }
 
+  function setMeta() {
+    $("#meta").textContent = `資料期間 ${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}・更新 ${D.generated}・來源 ${D.source.sellout}` +
+      (RAW._local ? "（本機上傳，尚未發布）" : "");
+  }
+
   function load(raw) {
     RAW = raw;
     D = prepare(SO.buildModel(raw));
     S.open.r1.clear(); S.open.r2.clear(); S.open.r3.clear(); S.open.r4.clear();
-    $("#meta").textContent = `資料期間 ${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}・更新 ${D.generated}・來源 ${D.source.sellout}` +
-      (raw._local ? "（本機上傳，尚未發布）" : "");
+    setMeta();
     initR1(); initR2(); initR3(); initR4(); renderAll(); renderUpdInfo();
   }
 

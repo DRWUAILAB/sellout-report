@@ -67,6 +67,11 @@ def main():
     ap.add_argument("--branch", default="main")
     ap.add_argument("--publish", action="store_true", help="產生後直接 commit 並 push")
     args = ap.parse_args()
+    git = lambda *a: subprocess.run(["git", *a], cwd=WEB).returncode
+    if args.publish:   # 網站只看 main（args.branch）：在其他分支 commit／push 的話網站拿不到金鑰
+        cur = subprocess.run(["git", "branch", "--show-current"], cwd=WEB, capture_output=True, text=True).stdout.strip()
+        if cur != args.branch:
+            sys.exit(f"[錯誤] 目前在 {cur or '（非分支）'}，請先 git checkout {args.branch} 再執行")
 
     token = getpass.getpass("GitHub 金鑰（輸入時不會顯示）：").strip()
     if not token:
@@ -76,11 +81,13 @@ def main():
     pwf = WEB / "build" / "password.txt"
     if not view_pw and pwf.exists():
         view_pw = pwf.read_text(encoding="utf-8-sig").strip()
+    while not view_pw:   # 找不到查看密碼時手動輸入，才能確認更新密碼和它不同
+        view_pw = getpass.getpass("找不到 build/password.txt，請輸入查看報表的密碼（只用來確認更新密碼和它不同）：").strip()
     while True:
         pw = getpass.getpass(f"更新密碼（至少 {MIN_LEN} 個字元，和查看報表的密碼不同）：")
         if len(pw) < MIN_LEN:
             print(f"太短：repo 是公開的，金鑰檔任何人都下載得到，更新密碼要夠長才猜不到")
-        elif view_pw and pw == view_pw:
+        elif pw == view_pw:
             print("不能和查看報表的密碼相同")
         elif getpass.getpass("再輸入一次：") != pw:
             print("兩次輸入不同")
@@ -90,8 +97,8 @@ def main():
     OUT.write_text(json.dumps(encrypt(payload, pw)), encoding="utf-8")
     print(f"已輸出 {OUT.relative_to(WEB)}")
     if args.publish:
-        git = lambda *a: subprocess.run(["git", *a], cwd=WEB).returncode
-        if git("add", "--", str(OUT.relative_to(WEB))) or git("commit", "-m", "設定網頁發布金鑰", "--", str(OUT.relative_to(WEB))) or git("push"):
+        rel = str(OUT.relative_to(WEB))
+        if git("add", "--", rel) or git("commit", "-m", "設定網頁發布金鑰", "--", rel) or git("push", "origin", args.branch):
             sys.exit("[失敗] commit／push 沒有完成，請看上方訊息")
         print("已發布，約 1 分鐘後網頁「發布到網站」就能使用")
     else:

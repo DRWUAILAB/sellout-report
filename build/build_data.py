@@ -311,7 +311,8 @@ def write_intermediate(data, tables, csv_dir, api_dir, password):
         buf = io.StringIO()
         w = csv.writer(buf, lineterminator="\n")
         w.writerow(cols)
-        w.writerows(rows)
+        # 整數值的浮點數寫成整數（10.0 → 10），和網頁發布（JS）產生的中繼表文字相同
+        w.writerows([int(v) if isinstance(v, float) and v.is_integer() else v for v in r] for r in rows)
         return buf.getvalue()
 
     csv_dir, api_dir = Path(csv_dir), Path(api_dir)
