@@ -398,10 +398,8 @@ window.SO = (() => {
   }
 
   // key＝{ token, repo: "owner/name", branch }，由 docs/publish_key.enc 以「更新密碼」解出（build/set_publish_key.py 產生）
-  // baseSha＝頁面載入的 data.enc 的 blob sha：GitHub 上的 data.enc 已經不是這一版（有人在這之後發布過、或換過查看密碼）就停止，
-  // 不覆蓋別人的版本；只有其他檔案（程式）變動造成的不是快轉才重試
-  async function publishToGitHub(key, files, message, baseSha, onStep = () => {}) {
-    const api = async (path, opt = {}) => {
+  function githubApi(key) {
+    return async (path, opt = {}) => {
       const res = await fetch(`https://api.github.com/repos/${key.repo}/${path}`, {
         ...opt, headers: { Authorization: `Bearer ${key.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
           ...(opt.body ? { "Content-Type": "application/json" } : {}) } });
@@ -414,10 +412,33 @@ window.SO = (() => {
           : res.status === 403 || res.status === 404 ? "GitHub 金鑰沒有這個 repo 的寫入權限，請找維護的人重新設定"
           : `GitHub 回應 ${res.status}：${body.message || res.statusText}`);
         err.status = res.status;
+        err.ghMessage = body.message || "";
         throw err;
       }
       return body;
     };
+  }
+
+  // baseSha＝頁面載入的 data.enc 的 blob sha：GitHub 上的 data.enc 已經不是這一版（有人在這之後發布過、或換過查看密碼）就停止，
+  // 不覆蓋別人的版本。回傳目前的 head commit
+  async function checkPublishBase(key, baseSha, api = githubApi(key)) {
+    const ref = await api(`git/ref/heads/${key.branch}`);
+    const head = await api(`git/commits/${ref.object.sha}`);
+    const live = (await api(`contents/docs?ref=${head.sha}`)).find(f => f.name === "data.enc");
+    if (live?.sha !== baseSha) {
+      const err = new Error("線上資料和你開啟這個頁面時載入的版本不同：可能有人剛發布、換了查看密碼，或網站快取還沒更新"
+        + "（每次發布後最多約 10 分鐘）。為避免覆蓋別人的版本，這次沒有發布：請約 10 分鐘後重新整理頁面、重新上傳，確認數字後再發布");
+      err.status = "conflict";
+      throw err;
+    }
+    return head;
+  }
+
+  // 只有其他檔案（程式）變動造成的「不是快轉」才重試
+  async function publishToGitHub(key, files, message, baseSha, onStep = () => {}) {
+    const api = githubApi(key);
+    onStep("確認線上版本…");
+    await checkPublishBase(key, baseSha, api);   // 先擋掉衝突，免得上傳完全部檔案才失敗
     const blobs = [];
     for (const [path, text] of Object.entries(files)) {   // 逐一上傳，避免同時大量請求觸發 GitHub 的流量限制
       onStep(`上傳檔案到 GitHub（${blobs.length + 1}/${Object.keys(files).length}）…`);
@@ -426,15 +447,7 @@ window.SO = (() => {
     }
     for (let attempt = 0; ; attempt++) {
       onStep("建立 commit…");
-      const ref = await api(`git/ref/heads/${key.branch}`);
-      const head = await api(`git/commits/${ref.object.sha}`);
-      const live = (await api(`contents/docs?ref=${head.sha}`)).find(f => f.name === "data.enc");
-      if (live?.sha !== baseSha) {
-        const err = new Error("線上資料在你開啟這個頁面之後已經更新（可能有人剛發布，或換了查看密碼）。為避免覆蓋別人的版本，"
-          + "這次沒有發布：請等 1–2 分鐘後重新整理頁面、重新上傳，確認數字後再發布");
-        err.status = "conflict";
-        throw err;
-      }
+      const head = await checkPublishBase(key, baseSha, api);
       const tree = await api("git/trees", { method: "POST", body: JSON.stringify({ base_tree: head.tree.sha, tree: blobs }) });
       const commit = await api("git/commits", { method: "POST", body: JSON.stringify({ message, tree: tree.sha, parents: [head.sha] }) });
       try {
@@ -442,7 +455,7 @@ window.SO = (() => {
         return { sha: commit.sha, url: `https://github.com/${key.repo}/commit/${commit.sha}`,
           dataSha: blobs.find(b => b.path === "docs/data.enc").sha };
       } catch (e) {
-        if (e.status !== 422 || attempt >= 2) throw e;
+        if (e.status !== 422 || !/fast.forward/i.test(e.ghMessage) || attempt >= 2) throw e;
       }
     }
   }
@@ -547,5 +560,5 @@ window.SO = (() => {
   }
 
   return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
-    intermediateTables, publishFiles, publishToGitHub, gitBlobSha, downloadXlsx };
+    intermediateTables, publishFiles, publishToGitHub, checkPublishBase, gitBlobSha, downloadXlsx };
 })();

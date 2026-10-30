@@ -69,9 +69,12 @@ def main():
     args = ap.parse_args()
     git = lambda *a: subprocess.run(["git", *a], cwd=WEB).returncode
     if args.publish:   # 網站只看 main（args.branch）：在其他分支 commit／push 的話網站拿不到金鑰
-        cur = subprocess.run(["git", "branch", "--show-current"], cwd=WEB, capture_output=True, text=True).stdout.strip()
+        r = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WEB, capture_output=True, text=True)
+        cur = r.stdout.strip()
+        if r.returncode:
+            sys.exit(f"[錯誤] 無法確認目前的 git 分支：{r.stderr.strip()}")
         if cur != args.branch:
-            sys.exit(f"[錯誤] 目前在 {cur or '（非分支）'}，請先 git checkout {args.branch} 再執行")
+            sys.exit(f"[錯誤] 目前在 {'（非分支）' if cur == 'HEAD' else cur}，請先 git checkout {args.branch} 再執行")
 
     token = getpass.getpass("GitHub 金鑰（輸入時不會顯示）：").strip()
     if not token:
@@ -93,6 +96,9 @@ def main():
             print("兩次輸入不同")
         else:
             break
+    # 網頁發布會直接在 GitHub 上新增 commit，本機通常落後：先同步，push 才不會被拒絕
+    if args.publish and git("pull", "--rebase", "--autostash", "origin", args.branch):
+        sys.exit("[失敗] 同步 GitHub 最新版本沒有完成，請看上方訊息")
     payload = json.dumps({"token": token, "repo": args.repo, "branch": args.branch}).encode()
     OUT.write_text(json.dumps(encrypt(payload, pw)), encoding="utf-8")
     print(f"已輸出 {OUT.relative_to(WEB)}")

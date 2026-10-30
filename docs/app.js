@@ -25,14 +25,15 @@
     return JSON.parse(await new Response(stream).text());
   }
 
-  let ENC = null, ENC_SHA = null, RAW = null, PASSWORD = null;   // ENC_SHA＝線上 data.enc 的 git blob sha（發布時確認沒被別人更新）
+  // ENC_SHA＝線上 data.enc 的 git blob sha（發布時確認沒被別人更新）；ONLINE＝解開的線上資料（還原、比對用，不會被修改）
+  let ENC = null, ENC_SHA = null, ONLINE = null, RAW = null, PASSWORD = null;
   async function open(password) {
     if (!ENC) {
       const buf = await (await fetch("data.enc", { cache: "no-cache" })).arrayBuffer();
       ENC = JSON.parse(new TextDecoder().decode(buf));
       ENC_SHA = await SO.gitBlobSha(buf);
     }
-    return decrypt(ENC, password);
+    return (ONLINE = await decrypt(ENC, password));
   }
 
   // 比較兩份資料是否相同（不看產生時間；鍵的順序不同也算相同）
@@ -1068,10 +1069,12 @@
           : `無法解開發布金鑰（${e.message}）。請改用最新版 Chrome／Edge，或找維護的人重新設定`);
       }
       if (!key?.token || !key.repo || !key.branch) throw new Error("發布金鑰內容不完整，請找維護的人重新執行 build/set_publish_key.py");
+      say("確認線上版本…");
+      await SO.checkPublishBase(key, ENC_SHA);   // 線上已不是載入的那一版就停止（下面的「相同」比對才準）
       const { _local, ...clean } = RAW;
-      if (sameData(clean, await decrypt(ENC, PASSWORD))) {
-        RAW._local = false; renderUpdInfo(); setMeta(); pwIn.value = "";
-        return say("✓ 上傳的資料和線上版本相同，不需要發布。", "ok");
+      if (sameData(clean, ONLINE)) {
+        load(ONLINE); $("#updPreview").hidden = true; pwIn.value = "";
+        return say("✓ 上傳的資料和線上版本相同，不需要發布，已切回線上資料。", "ok");
       }
       if (!confirm(`確定要發布？\n\nsell-out 明細：${clean.source.sellout}\n期間：${ymLabel(D.yms[0])}–${ymLabel(D.yms[D.yms.length - 1])}\n\n發布後所有人都會看到這份資料。`)) return say("");
       say("加密報表資料與中繼表…");
@@ -1079,6 +1082,7 @@
       const r = await SO.publishToGitHub(key, files, `網頁更新 sell-out 資料（${clean.source.sellout}）`, ENC_SHA, t => say(esc(t)));
       ENC = JSON.parse(files["docs/data.enc"]);   // 之後「還原為線上資料」與下一次發布的比對基準就是這一版
       ENC_SHA = r.dataSha;
+      ONLINE = clean;
       RAW._local = false;
       pwIn.value = "";
       renderUpdInfo();
@@ -1121,7 +1125,7 @@
         aoa: [["通路別", "通路名稱", "通路類別", "地區", "備註"], ...RAW.channels.map(c => c.map(v => v ?? ""))] }]);
     });
     $("#updDetail").addEventListener("click", exportCurrent);
-    $("#updReset").addEventListener("click", async () => { load(await decrypt(ENC, PASSWORD)); $("#updPreview").hidden = true; });
+    $("#updReset").addEventListener("click", async () => { load(ONLINE); $("#updPreview").hidden = true; });
     window.addEventListener("beforeunload", e => { if (RAW && RAW._local) { e.preventDefault(); e.returnValue = ""; } });
   }
 
