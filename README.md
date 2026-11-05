@@ -110,7 +110,9 @@ repo 是公開的，金鑰檔任何人都下載得到，安全性靠更新密碼
 
 1. 新的 sell-out 明細放進 `SellOut報表/03_原始資料_業務提供`（舊版移到子資料夾）。建置會自動取該資料夾裡**修改時間最新**、檔名含 SellOut 的明細檔（排除彙總表／業績總表、子資料夾不算）；要指定別的檔案用 `--sellout`
 2. 有執行 NS 維度表匯出時（`05_資料包/NS匯出` 有 D_Item.csv、D_BOM.csv、D_BOM_補.csv），會自動改用匯出的檔案，否則用資料包
-3. 點 `更新報表資料.bat`：重建 `docs/data.enc` 並 push，GitHub Pages 約 1 分鐘後更新
+3. 點 `更新報表資料.bat`：重建 `docs/data.enc` 與中繼表並 push，GitHub Pages 約 1 分鐘後更新
+
+發布只 commit 建置產物（`docs/data.enc`、`docs/api` 的 `.enc` 與 `index.json`）和 `build/` 的對照表 CSV；程式與 `docs/api` 的手寫檔（說明頁、`openapi.yaml`、`sellout_api.py`）要自己 commit、push。必須在 `main` 分支執行。本機有還沒推上去的 commit 時：只改建置產物與對照表的（例如上次推送失敗）會自動重建後發布；含其他檔案的會停下來，先自己 push 或處理後再執行。
 
 密碼放在 `build/password.txt`（不進版控），或設定環境變數 `SELLOUT_PASSWORD`。換密碼：改檔案後重跑一次，之後發布的資料就改用新密碼。注意 repo 是公開的，**舊版 data.enc 仍留在 git 歷史裡，用舊密碼還是打得開**；如果是因為密碼外流才換，必須清除 git 歷史（或刪掉 repo 重建後重新發布），不能只換密碼。
 
