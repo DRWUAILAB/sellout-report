@@ -1,6 +1,6 @@
 {
  "v": 1,
- "generated": "2026-10-28 17:20",
+ "generated": "2026-11-05 14:21",
  "source": {
   "sellout": "2026年度SellOut銷售資料檔202609.xlsx ＋ SellOut歷史明細_2019-2025_PowerBI.xlsx（2019–2025）",
   "datapack": "SellOut報表資料包_NS對照與拆組_20261007.xlsx",
@@ -44,7 +44,7 @@
    "name": "item",
    "title": "品項主檔",
    "file": "item.enc",
-   "rows": 13090,
+   "rows": 13116,
    "columns": [
     "品號",
     "品名",
