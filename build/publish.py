@@ -8,6 +8,8 @@ Sell-out 網頁報表：重建加密資料並發布到 GitHub（更新報表資�
   docs/api 的中繼表由同一份內容產生，data.enc 沒變時一併還原。
 - build/ 的對照表（系列對照、裸瓶對照、系列確認、補充BOM、通路類別調整）有修改時一起 commit，換電腦也不會遺失。
 - data.enc 由本機的原始資料重建；有人在網頁「資料更新」上傳發布過的版本會被這次的結果取代。
+- 建置產物（data.enc、docs/api 的 .enc 與 index.json）每次都會重建，同步時先丟掉本機未 commit 的版本，
+  變化才是和 GitHub 上的版本比，不是和本機先建置過的版本比。docs/api 的其他檔案（說明頁、openapi.yaml、取數程式）是手寫的，不會被還原。
 """
 import base64
 import gzip
@@ -22,6 +24,11 @@ WEB = Path(__file__).resolve().parent.parent
 DATA = "docs/data.enc"
 API = "docs/api"
 CONFIG_CSV = ["build/系列對照.csv", "build/裸瓶對照.csv", "build/系列確認.csv", "build/補充BOM.csv", "build/補充售價.csv", "build/通路類別調整.csv"]
+
+
+def is_generated(path):
+    """建置產物：每次發布都會重建，可以放心丟掉。"""
+    return path == DATA or path == f"{API}/index.json" or (path.startswith(f"{API}/") and path.endswith(".enc"))
 
 
 def git(*args, quiet=False):
@@ -55,22 +62,26 @@ def content_digest(path):
 
 
 def sync():
-    """同步 GitHub。本機還沒推上去的 commit 若只動到 data.enc（例如上次推送失敗），
-    先丟掉它們：反正這次會重建，留著只會和網頁上傳的版本衝突。"""
+    """同步 GitHub。本機還沒推上去的 commit 若只動到建置產物（例如上次推送失敗），
+    先丟掉它們：反正這次會重建，留著只會和網頁上傳的版本衝突。本機未 commit 的建置產物同樣丟掉。"""
     if git("fetch", "origin").returncode:
         fail("無法連上 GitHub（網路或登入問題？），沒有發布。")
     ahead = git("log", "--format=%H", "origin/main..HEAD", quiet=True).stdout.split()
     if ahead:
-        files = set(git("diff", "--name-only", "origin/main...HEAD", quiet=True).stdout.split())
-        if files <= {DATA}:
-            print(f"本機有 {len(ahead)} 個還沒推上去、只改 data.enc 的 commit，這次會重建，先捨棄。")
+        files = git("diff", "--name-only", "origin/main...HEAD", quiet=True).stdout.split()
+        if all(is_generated(f) for f in files):
+            print(f"本機有 {len(ahead)} 個還沒推上去、只改建置產物的 commit，這次會重建，先捨棄。")
             git("reset", "--soft", "origin/main")
-            git("checkout", "origin/main", "--", DATA)
+            if files:
+                git("restore", "--source=origin/main", "--staged", "--worktree", "--", *files)
+    tracked = [f for f in git("ls-files", "--", DATA, API, quiet=True).stdout.split() if is_generated(f)]
+    if tracked and git("restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked).returncode:
+        fail("無法還原本機的建置產物，沒有發布。")
     stashes = len(git("stash", "list", quiet=True).stdout.splitlines())
     if git("pull", "--rebase", "--autostash").returncode:
         if (WEB / ".git" / "rebase-merge").exists() or (WEB / ".git" / "rebase-apply").exists():
             git("rebase", "--abort")
-            fail("本機 commit 和 GitHub 上的版本衝突（不只 data.enc），已取消同步，沒有發布。請找維護的人處理 git 衝突。")
+            fail("本機 commit 和 GitHub 上的版本衝突（不只建置產物），已取消同步，沒有發布。請找維護的人處理 git 衝突。")
         fail("無法從 GitHub 取得最新版本（網路或登入問題？），沒有發布。")
     # autostash 放回本機修改時衝突，git 仍回傳成功、把修改留在 stash：停下來，不要在缺修改的狀態下發布
     if len(git("stash", "list", quiet=True).stdout.splitlines()) > stashes:
@@ -90,7 +101,7 @@ def main():
     paths = []
     if before is not None and before == content_digest(WEB / DATA):
         git("checkout", "--", DATA)   # 內容沒變：還原成原本的檔案，不產生沒有意義的 commit
-        tracked = [f for f in git("ls-files", "--", API, quiet=True).stdout.split() if not f.endswith(".py")]
+        tracked = [f for f in git("ls-files", "--", API, quiet=True).stdout.split() if is_generated(f)]
         if tracked:
             git("checkout", "--", *tracked)   # 中繼表同樣還原（加密值與建置時間不同，內容相同）
         print("報表資料內容沒有變化。")
@@ -101,12 +112,16 @@ def main():
     if git("add", "--", *paths).returncode:
         fail("git add 失敗，沒有發布。")
     if git("diff", "--cached", "--quiet", "--", *paths).returncode == 0:
-        print("\n資料與對照表都沒有變化，不需要發布。")
-        return
-    changed = git("-c", "core.quotepath=off", "diff", "--cached", "--name-only", "--", *paths, quiet=True).stdout.split()
-    print("這次發布：" + "、".join(changed))
-    if git("commit", "-m", "更新 sell-out 資料", "--", *paths).returncode:
-        fail("git commit 失敗，請看上方訊息，沒有發布。")
+        # 上次推送失敗、commit 又含對照表（同步時不能捨棄）時，這次內容相同但 commit 還沒推上去
+        if not git("log", "--format=%H", "origin/main..HEAD", quiet=True).stdout.split():
+            print("\n資料與對照表都沒有變化，不需要發布。")
+            return
+        print("這次沒有新的變化，但本機有上次沒推上去的 commit，直接推送。")
+    else:
+        changed = git("-c", "core.quotepath=off", "diff", "--cached", "--name-only", "--", *paths, quiet=True).stdout.split()
+        print("這次發布：" + "、".join(changed))
+        if git("commit", "-m", "更新 sell-out 資料", "--", *paths).returncode:
+            fail("git commit 失敗，請看上方訊息，沒有發布。")
     step("[4/4] 推送到 GitHub")
     if git("push").returncode:
         fail("推送到 GitHub 失敗（網路、登入或有人同時更新），報表還沒更新。排除問題後再執行一次即可（會自動處理這次沒推上去的 commit）。")
