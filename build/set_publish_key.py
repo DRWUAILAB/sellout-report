@@ -8,7 +8,7 @@ Sell-out 網頁報表：設定「網頁直接發布」用的 GitHub 金鑰
 金鑰請用 GitHub fine-grained personal access token：
     Settings → Developer settings → Fine-grained tokens → Generate new token
     Resource owner：DRWUAILAB；Repository access：Only select repositories → sellout-report
-    Repository permissions：Contents → Read and write（其他都不用）
+    Repository permissions：Contents → Read and write；Actions → Read and write（網頁「從 NS 同步」按鈕要用）
 金鑰到期、換更新密碼、或懷疑外流時，重新產生金鑰再執行一次（舊金鑰請在 GitHub 上 Revoke：repo 是公開的，
 舊的 publish_key.enc 留在 git 歷史裡，用舊更新密碼仍解得開）。
 

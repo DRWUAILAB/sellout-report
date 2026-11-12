@@ -106,6 +106,18 @@ df = fetch_df("item")          # pandas DataFrame，品號等代碼欄保持文�
 
 repo 是公開的，金鑰檔任何人都下載得到，安全性靠更新密碼的長度；舊的 publish_key.enc 會留在 git 歷史裡，換密碼或懷疑外流時一定要在 GitHub 上 Revoke 舊金鑰。金鑰權限只限這個 repo 的內容。
 
+**從 NS 同步（網頁按鈕，2026-11-12 起）**
+
+「資料更新 → 從 NS 同步」輸入更新密碼：網頁用發布金鑰觸發 GitHub Actions（`.github/workflows/ns-sync.yml`），Actions 以 `ns_sync/run_ns_sync.py` 在 NS 正式區跑 SQL A～C（只讀），把 D_Item、D_BOM、D_BOM_補 用**查看密碼**加密後推到 `ns-sync` 分支（只留最新一次，不動 main，不觸發網站重建）。網頁讀回、解密後走和上傳 NS 維度表相同的流程：預覽「項目主檔與 BOM 變動」（新增／停用品項、售價、系列、品名、BOM，並列出有銷售但 NS 沒有售價的品項）→ 套用到報表 → 發布。約 1–3 分鐘。Actions 記錄是公開的，只印筆數；匯出細節在加密檔裡（網頁「匯出紀錄」）。
+
+第一次設定：
+
+1. repo → Settings → Secrets and variables → Actions 新增 6 個 Secret：`NS_ACCOUNT_ID`、`NS_CONSUMER_KEY`、`NS_CONSUMER_SECRET`、`NS_TOKEN_ID`、`NS_TOKEN_SECRET`（同 NS匯入程式 正式區的金鑰）、`SELLOUT_PASSWORD`（查看報表的密碼；換查看密碼時要一起改，否則同步結果解不開）
+2. 發布金鑰加上 Actions 權限：重新產生 fine-grained token，Repository permissions 勾 Contents 與 **Actions** → Read and write，再執行 `python build/set_publish_key.py --publish`
+3. NS 整合角色若有 IP 限制，要允許 GitHub Actions 的 IP（失敗時看 Actions 執行紀錄的 HTTP 狀態）
+
+`ns_sync/` 的 `export_sellout_dims.py`、`ns_client.py`、`sql/` 是 `SellOut報表/06_程式碼` 的複本（`--env-secrets` 改從環境變數讀金鑰）；改 SQL 或匯出邏輯時兩邊要一起改。
+
 **方法二：本機程式**（用電腦上的原始資料整份重建，會取代網頁上傳發布的版本；報表內容沒有變化時不會發布，`build/` 的對照表 CSV 有修改會一起推上 GitHub）
 
 1. 新的 sell-out 明細放進 `SellOut報表/03_原始資料_業務提供`（舊版移到子資料夾）。建置會自動取該資料夾裡**修改時間最新**、檔名含 SellOut 的明細檔（排除彙總表／業績總表、子資料夾不算）；要指定別的檔案用 `--sellout`

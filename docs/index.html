@@ -175,6 +175,16 @@
       </section>
     </div>
     <section class="card">
+      <div class="card-head"><h2>從 NS 同步項目主檔與 BOM</h2></div>
+      <p class="small">直接從 NS 正式區取最新的品項（售價、系列、品名）與組包 BOM，不用在電腦上執行匯出程式。只讀取 NS，不會寫入。約 1–3 分鐘；取回後在上方「① 上傳新資料」預覽變動（含售價變動、有銷售但沒有售價的品項），按「套用到報表」，再到「② 發布給所有人」發布。sell-out 明細不受影響。</p>
+      <form class="btns-row" id="nsForm" autocomplete="off">
+        <input type="password" id="nsPw" placeholder="更新密碼" autocomplete="new-password" aria-label="更新密碼（NS 同步）">
+        <button type="submit" id="nsBtn">⟳ 從 NS 同步</button>
+      </form>
+      <div id="nsMsg" class="small"></div>
+      <details class="small"><summary>匯出紀錄</summary><pre id="nsLog" class="small" hidden></pre></details>
+    </section>
+    <section class="card">
       <div class="card-head"><h2>② 發布給所有人</h2></div>
       <p class="small">上傳的資料只在你這個分頁有效（重新整理就會消失）。確認數字沒問題、按過「套用到報表」後，輸入<b>更新密碼</b>（和查看報表的密碼不同，只給負責更新的人）直接發布：</p>
       <form class="btns-row" id="updPubForm" autocomplete="off">

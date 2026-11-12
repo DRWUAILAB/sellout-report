@@ -399,9 +399,9 @@ window.SO = (() => {
 
   // key＝{ token, repo: "owner/name", branch }，由 docs/publish_key.enc 以「更新密碼」解出（build/set_publish_key.py 產生）
   function githubApi(key) {
-    return async (path, opt = {}) => {
+    return async (path, { accept, permHint, ...opt } = {}) => {   // accept：例 raw 取檔案原始內容；permHint：403／404 時的說明
       const res = await fetch(`https://api.github.com/repos/${key.repo}/${path}`, {
-        ...opt, headers: { Authorization: `Bearer ${key.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+        ...opt, cache: "no-store", headers: { Authorization: `Bearer ${key.token}`, Accept: accept || "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
           ...(opt.body ? { "Content-Type": "application/json" } : {}) } });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -409,6 +409,7 @@ window.SO = (() => {
           || res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(body.message || "")));
         const err = new Error(limited ? "GitHub 暫時限制請求次數，請等幾分鐘後再發布"
           : res.status === 401 ? "GitHub 金鑰無效或已過期，請找維護的人重新設定（build/set_publish_key.py）"
+          : permHint && (res.status === 403 || res.status === 404) ? permHint
           : res.status === 403 || res.status === 404 ? "GitHub 金鑰沒有這個 repo 的寫入權限，請找維護的人重新設定"
           : `GitHub 回應 ${res.status}：${body.message || res.statusText}`);
         err.status = res.status;
@@ -560,5 +561,5 @@ window.SO = (() => {
   }
 
   return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
-    intermediateTables, publishFiles, publishToGitHub, checkPublishBase, gitBlobSha, downloadXlsx };
+    intermediateTables, publishFiles, publishToGitHub, checkPublishBase, gitBlobSha, downloadXlsx, githubApi };
 })();

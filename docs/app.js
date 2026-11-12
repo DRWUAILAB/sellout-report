@@ -993,6 +993,44 @@
     return { next, log };
   }
 
+  // 項目主檔與 BOM 的變動（上傳或 NS 同步了 D_Item／D_BOM 時才顯示）：新增／停用品項、售價、系列、品名、BOM 組包
+  function dimDiffHtml(prev, next) {
+    if (prev.items === next.items && prev.bom.ns === next.bom.ns && prev.bom.bu === next.bom.bu) return "";
+    const lastY = next.so.reduce((m, r) => (r[0] > m ? r[0] : m), "").slice(0, 4);
+    const sold = new Map();   // 最近一年有銷售的品號 → 金額
+    for (const r of next.so) if (r[0].startsWith(lastY)) sold.set(r[2], (sold.get(r[2]) || 0) + r[5]);
+    const old = new Map(prev.items.map(i => [i[0], i])), now = new Map(next.items.map(i => [i[0], i]));
+    const rows = [];
+    const pr = v => (v == null ? "（空白）" : fmtN(v));
+    for (const [c, n] of now) {
+      const o = old.get(c);
+      if (!o) { rows.push([c, n[1], "新增品項", "", pr(n[I.PRICE])]); continue; }
+      if ((o[I.PRICE] ?? null) !== (n[I.PRICE] ?? null)) rows.push([c, n[1], "售價", pr(o[I.PRICE]), pr(n[I.PRICE])]);
+      if ((o[I.SERIES] || "") !== (n[I.SERIES] || "")) rows.push([c, n[1], "系列", o[I.SERIES] || "", n[I.SERIES] || ""]);
+      if ((o[I.NAME] || "") !== (n[I.NAME] || "")) rows.push([c, n[1], "品名", o[I.NAME] || "", n[I.NAME] || ""]);
+      if ((o[10] || "F") !== (n[10] || "F")) rows.push([c, n[1], "停用", o[10] === "T" ? "停用" : "啟用", n[10] === "T" ? "停用" : "啟用"]);
+    }
+    for (const [c, o] of old) if (!now.has(c)) rows.push([c, o[1], "NS 已無此品項", "", ""]);
+    rows.sort((a, b) => (sold.has(b[0]) - sold.has(a[0])) || (sold.get(b[0]) || 0) - (sold.get(a[0]) || 0));
+    const kitRows = bom => { const m = new Map(); for (const r of bom || []) m.set(r[0], [...(m.get(r[0]) || []), r.slice(1).join("×")].sort()); return m; };
+    const kb = [];
+    for (const k of ["ns", "bu"]) {
+      const a = kitRows(prev.bom[k]), b = kitRows(next.bom[k]);
+      for (const [kit, v] of b) if (!a.has(kit)) kb.push(`${kit} 新增`); else if (a.get(kit).join() !== v.join()) kb.push(`${kit} 成分變動`);
+      for (const kit of a.keys()) if (!b.has(kit)) kb.push(`${kit} 移除`);
+    }
+    const extra = new Set((next.priceExtra || []).map(r => r[0]));
+    const noPrice = [...sold].filter(([c]) => now.has(c) && !now.get(c)[I.PRICE] && !extra.has(c)).sort((a, b) => b[1] - a[1]);
+    const soldTag = c => (sold.has(c) ? `<span class="tag">${lastY} 有銷售</span>` : "");
+    return `<h3>項目主檔與 BOM 變動</h3>
+      ${rows.length ? `<p class="small">${fmtN(rows.length)} 項變動（${lastY} 年有銷售的排前面；售價變動會改變市價與折扣率）</p>
+      <div class="tbl-wrap short"><table class="tbl"><thead><tr><th class="l">品號</th><th class="l">品名</th><th class="l">變動</th><th>原本</th><th>NS 現在</th></tr></thead><tbody>
+      ${rows.slice(0, 500).map(r => `<tr><td class="l">${esc(r[0])}${soldTag(r[0])}</td><td class="l">${esc(r[1])}</td><td class="l">${esc(r[2])}</td><td>${esc(r[3])}</td><td>${esc(r[4])}</td></tr>`).join("")}
+      </tbody></table></div>${rows.length > 500 ? `<p class="small muted">只列前 500 項</p>` : ""}` : `<p class="small">品項的品名、系列、售價、停用狀態都沒有變動。</p>`}
+      <p class="small">BOM：${kb.length ? esc(kb.slice(0, 30).join("、")) + (kb.length > 30 ? ` …共 ${kb.length} 個組包` : "") : "沒有變動"}</p>
+      ${noPrice.length ? `<div class="warnbox">⚠ ${lastY} 年有銷售、但 NS 沒有售價（市價會是 0）的品項 ${noPrice.length} 個：${noPrice.slice(0, 15).map(([c, a]) => `${esc(c)} ${esc(now.get(c)[1])}（${fmtN(a)} 元）`).join("、")}${noPrice.length > 15 ? " …" : ""}。請在 NS 補 Base Price，或寫進補充售價</div>` : ""}`;
+  }
+
   async function previewUpload(files) {
     const box = $("#updPreview");
     box.hidden = false;
@@ -1020,6 +1058,7 @@
       box.innerHTML = `
         <h3>讀到的檔案</h3><ul>${log.map(l => `<li class="${l.startsWith("⚠") ? "err" : ""}">${esc(l)}</li>`).join("")}</ul>
         ${warn.length ? `<div class="warnbox">${warn.map(w => `⚠ ${esc(w)}`).join("<br>")}</div>` : `<p class="ok">✓ 檢查通過：拆組前後金額一致、通路與品號都對得到</p>`}
+        ${dimDiffHtml(RAW, next)}
         <h3>各月台幣金額（未拆組）</h3>
         <div class="tbl-wrap short"><table class="tbl"><thead><tr><th class="l">年月</th><th>目前</th><th>上傳後</th><th>差異</th></tr></thead><tbody>
         ${yms.map(y => { const b = before.get(y), a = after.get(y), d = (a || 0) - (b || 0);
@@ -1049,6 +1088,76 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
+  // 更新密碼解開 docs/publish_key.enc → { token, repo, branch }（發布與 NS 同步共用）
+  async function unlockKey(updatePw) {
+    const res = await fetch("publish_key.enc", { cache: "no-store" });
+    if (!res.ok) throw new Error("網站還沒有設定發布金鑰（docs/publish_key.enc），請找維護的人執行 build/set_publish_key.py");
+    let enc, key;
+    try { enc = await res.json(); } catch { throw new Error("發布金鑰檔（docs/publish_key.enc）格式錯誤，請找維護的人重新執行 build/set_publish_key.py"); }
+    try { key = await decrypt(enc, updatePw); } catch (e) {
+      // 密碼錯誤時 AES-GCM 驗證失敗（OperationError）；其他錯誤多半是檔案損毀或瀏覽器不支援
+      throw new Error(e.name === "OperationError" ? "更新密碼錯誤"
+        : `無法解開發布金鑰（${e.message}）。請改用最新版 Chrome／Edge，或找維護的人重新設定`);
+    }
+    if (!key?.token || !key.repo || !key.branch) throw new Error("發布金鑰內容不完整，請找維護的人重新執行 build/set_publish_key.py");
+    return key;
+  }
+
+  // 從 NS 同步：觸發 GitHub Actions（.github/workflows/ns-sync.yml）在 NS 正式區跑 SQL A～C，
+  // 結果用查看密碼加密後放在 ns-sync 分支；讀回、解密後當成上傳的 NS 維度表，走同一套預覽 → 套用 → 發布
+  const NS_WF = "ns-sync.yml", NS_BRANCH = "ns-sync";
+  const ACTIONS_HINT = "無法啟動 NS 同步：repo 還沒有工作流程檔 .github/workflows/ns-sync.yml，或 GitHub 金鑰沒有 Actions 權限（Repository permissions 加上 Actions → Read and write 後執行 build/set_publish_key.py）。請找維護的人處理";
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  async function nsSync() {
+    const msg = $("#nsMsg"), btn = $("#nsBtn"), pwIn = $("#nsPw"), logBox = $("#nsLog");
+    const say = (html, cls = "") => { msg.className = "small " + cls; msg.innerHTML = html; };
+    if (!pwIn.value) return say("請輸入更新密碼。", "err");
+    if (RAW._local && !confirm("目前有上傳但還沒發布的資料。NS 同步的結果會加在這份資料上（明細不變，只換項目主檔與 BOM）。要繼續嗎？")) return;
+    btn.disabled = true; logBox.hidden = true;
+    const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
+    try {
+      say("驗證更新密碼…");
+      const key = await unlockKey(pwIn.value);
+      const api = SO.githubApi(key);
+      const rid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      say("啟動 NS 同步…");
+      await api(`actions/workflows/${NS_WF}/dispatches`, { method: "POST", permHint: ACTIONS_HINT,
+        body: JSON.stringify({ ref: key.branch, inputs: { request_id: rid } }) });
+      let run = null;
+      for (;;) {   // 找這一次的執行（run-name 含識別碼），等它跑完；NS 匯出通常 1–3 分鐘
+        await wait(run ? 5000 : 3000);
+        if (secs() > 900) throw new Error("等了 15 分鐘還沒完成，請到 GitHub Actions 查看");
+        if (!run) {
+          const runs = await api(`actions/workflows/${NS_WF}/runs?event=workflow_dispatch&per_page=20`, { permHint: ACTIONS_HINT });
+          run = (runs.workflow_runs || []).find(r => (r.name || r.display_title || "").includes(rid)) || null;
+          if (!run) { if (secs() > 90) throw new Error("GitHub Actions 沒有開始執行（請確認 repo 的 Actions 已啟用）"); say(`等待 GitHub Actions 開始…（${secs()} 秒）`); continue; }
+        } else run = await api(`actions/runs/${run.id}`, { permHint: ACTIONS_HINT });
+        if (run.status === "completed") break;
+        say(`從 NS 匯出中…（${secs()} 秒，<a href="${esc(run.html_url)}" target="_blank" rel="noopener">執行紀錄</a>）`);
+      }
+      if (run.conclusion !== "success")
+        throw new Error(`NS 匯出失敗（${run.conclusion}）。請看 GitHub 的執行紀錄：${run.html_url}（常見原因：NS 金鑰 Secrets 沒設或過期、NS 連線逾時）`);
+      say("讀取同步結果…");
+      const enc = await api(`contents/ns_sync.enc?ref=${NS_BRANCH}`, { accept: "application/vnd.github.raw+json" });
+      let res;
+      try { res = await decrypt(enc, PASSWORD); } catch {
+        throw new Error("同步結果解不開：GitHub Secret SELLOUT_PASSWORD 和目前查看報表的密碼不同，請找維護的人更新 Secret");
+      }
+      if (res.request_id !== rid) throw new Error("讀到的不是這一次的同步結果（可能同時有人在同步），請再按一次");
+      pwIn.value = "";
+      logBox.textContent = res.log || ""; logBox.hidden = !res.log;
+      const tag = `NS同步_${res.generated.replace(/[-: ]/g, "").slice(0, 12)}`;
+      const files = Object.entries(res.files).filter(([, text]) => text)
+        .map(([name, text]) => new File([text], `${tag}_${name}`, { type: "text/csv" }));
+      say(`✓ 已從 NS 取得 ${esc(res.generated)} 的項目主檔與 BOM（${secs()} 秒）。請檢查下方「① 上傳新資料」的預覽，按「套用到報表」後再到「② 發布給所有人」發布。`, "ok");
+      await previewUpload(files);
+      $("#updPreview").scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      console.error(err);
+      say(`NS 同步失敗：${esc(err.message)}`, "err");
+    } finally { btn.disabled = false; }
+  }
+
   // 直接發布：更新密碼解開 docs/publish_key.enc（GitHub 金鑰，build/set_publish_key.py 產生），
   // 以目前的查看密碼加密 data.enc 與中繼表，一個 commit 推到 GitHub。金鑰只留在這次呼叫的記憶體裡
   async function publish() {
@@ -1059,16 +1168,7 @@
     btn.disabled = true;
     try {
       say("驗證更新密碼…");
-      const res = await fetch("publish_key.enc", { cache: "no-store" });
-      if (!res.ok) throw new Error("網站還沒有設定發布金鑰（docs/publish_key.enc），請找維護的人執行 build/set_publish_key.py");
-      let enc, key;
-      try { enc = await res.json(); } catch { throw new Error("發布金鑰檔（docs/publish_key.enc）格式錯誤，請找維護的人重新執行 build/set_publish_key.py"); }
-      try { key = await decrypt(enc, pwIn.value); } catch (e) {
-        // 密碼錯誤時 AES-GCM 驗證失敗（OperationError）；其他錯誤多半是檔案損毀或瀏覽器不支援
-        throw new Error(e.name === "OperationError" ? "更新密碼錯誤"
-          : `無法解開發布金鑰（${e.message}）。請改用最新版 Chrome／Edge，或找維護的人重新設定`);
-      }
-      if (!key?.token || !key.repo || !key.branch) throw new Error("發布金鑰內容不完整，請找維護的人重新執行 build/set_publish_key.py");
+      const key = await unlockKey(pwIn.value);
       say("確認線上版本…");
       await SO.checkPublishBase(key, ENC_SHA);   // 線上已不是載入的那一版就停止（下面的「相同」比對才準）
       const { _local, ...clean } = RAW;
@@ -1115,6 +1215,7 @@
       } finally { btn.disabled = false; btn.textContent = t; }
     });
     $("#updPubForm").addEventListener("submit", e => { e.preventDefault(); publish(); });
+    $("#nsForm").addEventListener("submit", e => { e.preventDefault(); nsSync(); });
     $("#updSeries").addEventListener("click", () => {
       const rows = [["原系列名稱", "報表系列名稱"], ...(RAW.seriesMap || [])];
       download("系列對照.csv", new Blob(["\uFEFF" + rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n")], { type: "text/csv" }));
