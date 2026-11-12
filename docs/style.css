@@ -215,3 +215,4 @@ details.ms[open] > summary { border-color: var(--accent); }
 #updPubPw { padding: 6px 10px; min-width: 200px; }
 #updPubMsg { min-height: 1.5em; margin: 6px 0; }
 #nsLog { white-space: pre-wrap; max-height: 240px; overflow: auto; background: var(--surface-2); padding: 8px; border-radius: 6px; }
+.warnbox.block { border: 1px solid var(--bad); }

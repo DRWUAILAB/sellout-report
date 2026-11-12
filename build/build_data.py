@@ -84,6 +84,27 @@ def read_sellout(path, skip_years=()):
     return rows
 
 
+# 品號被 Excel 截斷（2026-11-12：202610 明細 12 碼品號存成數字、以科學記號存檔，只剩前 6 碼，例 104041000000）：
+# 項目主檔沒有、而且是科學記號或 9 碼以上、結尾 4 個以上 0 的品號。規則同網頁 data.js truncatedCodes
+SCI_RE = re.compile(r"^\d(\.\d+)?E\+?\d+$", re.I)
+TRUNC_RE = re.compile(r"^\d{9,}$")
+
+
+def truncated_codes(rows, known):
+    """回傳 {品號: [列數, 金額, 品名, {通路}, {年月}]}。"""
+    out = {}
+    for r in rows:
+        c = r["item"]
+        if c in known or not (SCI_RE.match(c) or (TRUNC_RE.match(c) and c.endswith("0000"))):
+            continue
+        v = out.setdefault(c, [0, 0.0, r.get("name"), set(), set()])
+        v[0] += 1
+        v[1] += r["amt"] or 0
+        v[3].add(r["ch"])
+        v[4].add(r["ym"])
+    return out
+
+
 # ---------------------------------------------------------------- 維度表
 def read_table(wb, sheet):
     it = wb[sheet].iter_rows(values_only=True)
@@ -390,6 +411,7 @@ def main():
     ap.add_argument("--inter-dir", default=str(ROOT / "09_中繼表"), help="中繼表明文 CSV 輸出資料夾（不進版控）")
     ap.add_argument("--api-dir", default=str(WEB / "docs" / "api"), help="中繼表加密 API 檔輸出資料夾")
     ap.add_argument("--no-inter", action="store_true", help="不輸出中繼表")
+    ap.add_argument("--allow-truncated", action="store_true", help="明細有疑似被 Excel 截斷的品號時仍繼續建置（確定品號正確才用）")
     args = ap.parse_args()
     if not args.sellout:
         args.sellout = str(latest_sellout())
@@ -398,9 +420,19 @@ def main():
     nsdir = Path(args.nsdir) if Path(args.nsdir).is_dir() else None
     pack = openpyxl.load_workbook(args.datapack, read_only=True, data_only=True)
     fso = read_sellout(args.sellout)
+    n_main = len(fso)   # 只檢查主明細（歷史資料不檢查品號截斷）
     hist, hist_files = read_history(args.history, fso)
     fso += hist
     items, item_origin = load_items(pack, nsdir)
+    trunc = truncated_codes(fso[:n_main], items.keys())
+    if trunc:
+        print(f"[錯誤] 明細有 {len(trunc)} 個品號疑似被 Excel 截斷（項目主檔沒有、結尾一串 0 或科學記號），"
+              f"共 {sum(v[0] for v in trunc.values())} 列、{sum(v[1] for v in trunc.values()):,.0f} 元：")
+        for c, (n, amt, name, chs, yms) in sorted(trunc.items(), key=lambda kv: -kv[1][1])[:30]:
+            print(f"    {c}  {name or ''}  {n} 列 {amt:,.0f} 元  {'、'.join(sorted(chs))}  {'、'.join(sorted(yms))}")
+        print("  請業務把「DRWU品號」欄設成文字格式後重新提供（不要另存 CSV 再開）；確定品號正確才加 --allow-truncated")
+        if not args.allow_truncated:
+            sys.exit(1)
     price_extra = extra_prices()
     items_check = {k: dict(v) for k, v in items.items()}   # 驗算用：套用補充售價（輸出的 items 維持 NS 原值，由網頁套用）
     apply_extra_prices(items_check)

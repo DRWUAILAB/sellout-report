@@ -990,7 +990,7 @@
       for (const [y, fs] of soYears) if (fs.length > 1)
         log.push(`⚠ ${y} 年度出現在 ${fs.length} 個檔案（${fs.join("、")}），已合併加總；如果是同一份資料的重複檔，請只上傳一個`);
     }
-    return { next, log };
+    return { next, log, soYears: new Set(soYears.keys()), soNew };
   }
 
   // 項目主檔與 BOM 的變動（上傳或 NS 同步了 D_Item／D_BOM 時才顯示）：新增／停用品項、售價、系列、品名、BOM 組包
@@ -1037,7 +1037,7 @@
     box.innerHTML = `<p class="muted">讀取中…</p>`;
     PENDING = null;
     try {
-      const { next, log } = await readFiles(files);
+      const { next, log, soNew } = await readFiles(files);
       const model = SO.buildModel(next);
       // 拆組後金額應與拆組前相同
       const so = model.fso.reduce((s, r) => s + r[4], 0);
@@ -1054,9 +1054,20 @@
       if (noItem.length) warn.push(`${new Set(noItem.map(r => r[2])).size} 個品號在項目主檔找不到（${fmtN(noItem.reduce((s, r) => s + r[5], 0))} 元）`);
       const adjMiss = [...new Set(model.chAdjust.filter(r => !r[6] && !r[10]).map(r => r[0]))];
       if (adjMiss.length) warn.push(`通路調整有 ${adjMiss.length} 個通路別不在通路對照、明細也沒有：${adjMiss.join("、")}（請檢查是否打錯）`);
+      // 品號截斷防呆：只檢查這次上傳的明細列；有就擋下「套用到報表」，要勾選確認才放行
+      const trunc = SO.truncatedCodes(soNew, itemKnown);
+      const truncHtml = !trunc.length ? "" : `<div class="warnbox block">
+        <b class="err">⛔ ${trunc.length} 個品號疑似被 Excel 截斷（${fmtN(trunc.reduce((s, t) => s + t[1], 0))} 列、${fmtN(trunc.reduce((s, t) => s + t[2], 0))} 元），已暫停套用</b>
+        <p>這些品號在項目主檔找不到，而且結尾是一串 0（或是科學記號），通常是「DRWU品號」欄被 Excel 當成數字存檔，只留下前 6 碼。不同品項會被合成同一個品號，市價變 0、折扣率失真，事後無法還原。請業務把品號欄設成文字格式後重新提供明細（不要另存 CSV 再開）。</p>
+        <div class="tbl-wrap short"><table class="tbl"><thead><tr><th class="l">品號</th><th class="l">明細品名</th><th>列數</th><th>金額</th><th class="l">通路</th><th class="l">年月</th></tr></thead><tbody>
+        ${trunc.slice(0, 200).map(([c, n, a, chs, yms]) => `<tr><td class="l">${esc(c)}</td><td class="l">${esc((next.soNames || {})[c] || "")}</td><td>${fmtN(n)}</td><td>${fmtN(a)}</td><td class="l">${esc([...chs].join("、"))}</td><td class="l">${esc([...yms].sort().map(ymLabel).join("、"))}</td></tr>`).join("")}
+        </tbody></table></div>
+        <label class="small"><input type="checkbox" id="updTruncOk"> 我確認這些品號是正確的（例如 NS 真的有這些新品號），仍要套用</label>
+      </div>`;
       if (model.currencyIssues.length) warn.push(`幣別與其他月份不一致：${model.currencyIssues.map(([c, y]) => `${c} ${ymLabel(y)}`).join("、")}`);
       box.innerHTML = `
         <h3>讀到的檔案</h3><ul>${log.map(l => `<li class="${l.startsWith("⚠") ? "err" : ""}">${esc(l)}</li>`).join("")}</ul>
+        ${truncHtml}
         ${warn.length ? `<div class="warnbox">${warn.map(w => `⚠ ${esc(w)}`).join("<br>")}</div>` : `<p class="ok">✓ 檢查通過：拆組前後金額一致、通路與品號都對得到</p>`}
         ${dimDiffHtml(RAW, next)}
         <h3>各月台幣金額（未拆組）</h3>
@@ -1066,6 +1077,10 @@
         </tbody></table></div>
         <div class="btns-row"><button type="button" id="updApply">套用到報表</button><button type="button" class="ghost" id="updCancel">取消</button></div>`;
       PENDING = next;
+      if (trunc.length) {
+        $("#updApply").disabled = true;
+        $("#updTruncOk").onchange = e => { $("#updApply").disabled = !e.target.checked; };
+      }
       $("#updApply").onclick = () => {
         PENDING.generated = nowStr();
         PENDING._local = true;

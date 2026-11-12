@@ -223,6 +223,21 @@ window.SO = (() => {
   const num = v => (v == null || v === "" ? 0 : +String(v).replace(/,/g, "") || 0);   // 文字格式的「1,234」也能讀
 
   // sell-out 明細：所有「yyyy年度」工作表，第 1 列小計、第 2 列標題（同 Power Query 01）
+  // 品號被 Excel 截斷（2026-11-12：202610 明細 12 碼品號以科學記號存檔，只剩前 6 碼，例 104041000000，不同品項被合成同一個品號）：
+  // 項目主檔沒有、而且是科學記號或 9 碼以上、結尾 4 個以上 0 的品號。規則同 build_data.py truncated_codes
+  // rows：sell-out 列 [ym, ch, item, cur, qty, amt]；回傳 [[品號, 列數, 金額, Set(通路), Set(年月)]]，金額大的在前
+  function truncatedCodes(rows, knownCodes) {
+    const m = new Map();
+    for (const r of rows) {
+      const c = r[2];
+      if (knownCodes.has(c) || !(/^\d(\.\d+)?E\+?\d+$/i.test(c) || (/^\d{9,}$/.test(c) && c.endsWith("0000")))) continue;
+      const v = m.get(c) || [c, 0, 0, new Set(), new Set()];
+      v[1]++; v[2] += r[5]; v[3].add(r[1]); v[4].add(r[0]);
+      m.set(c, v);
+    }
+    return [...m.values()].sort((a, b) => b[2] - a[2]);
+  }
+
   function parseSellout(wb) {
     const rows = [], years = [], emptyYears = [], names = {};
     for (const name of [...wb.SheetNames].sort()) {   // 年度由舊到新：同品號取最新年度的品名
@@ -560,6 +575,6 @@ window.SO = (() => {
     XLSX.writeFile(wb, filename);
   }
 
-  return { SRC, buildModel, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
+  return { SRC, buildModel, truncatedCodes, parseSellout, parseChannels, isChAdjust, parseCsv, itemsFromCsv, bomFromCsv, encrypt,
     intermediateTables, publishFiles, publishToGitHub, checkPublishBase, gitBlobSha, downloadXlsx, githubApi };
 })();
